@@ -234,14 +234,25 @@
     - name: Debug join commands
       debug:
         msg: "Found join commands: {{ all_join_commands }}"
+      when: all_join_commands is defined
+
+    - name: Debug first join command
+      debug:
+        msg: "First join command (raw): {{ all_join_commands[0] | default('NOT_FOUND') }}"
+      when: all_join_commands is defined and all_join_commands | length > 0
+
+    - name: Debug last join command
+      debug:
+        msg: "Last join command (raw): {{ all_join_commands[-1] | default('NOT_FOUND') }}"
+      when: all_join_commands is defined and all_join_commands | length > 0
 
     - name: Save kubeadm join command for control plane
       set_fact:
-        kubeadm_join_command: "{{ all_join_commands[0] | default('') }}"
+        kubeadm_join_command: "{{ (all_join_commands[0] | default('')) | string | trim }}"
 
     - name: Save kubeadm join command for workers
       set_fact:
-        kubeadm_join_command_worker: "{{ all_join_commands[-1] | default(all_join_commands[0] | default('')) }}"
+        kubeadm_join_command_worker: "{{ (all_join_commands[-1] | default(all_join_commands[0] | default(''))) | string | trim }}"
 
     - name: Create .kube directory
       file:
@@ -311,9 +322,9 @@
       set_fact:
         join_command_raw: "{{ hostvars[groups['control_plane'][0]]['kubeadm_join_command_worker'] | default('') }}"
 
-    - name: Clean join command (remove backslashes, newlines, and normalize whitespace)
+    - name: Clean join command (ensure it's a string and remove trailing backslashes)
       set_fact:
-        join_command: "{{ join_command_raw | regex_replace('\\\\\\s*$', '') | regex_replace('\\s+', ' ') | trim }}"
+        join_command: "{{ (join_command_raw | default('')) | string | replace('[', '') | replace(']', '') | replace(\"'\", '') | replace('\"', '') | regex_replace('\\\\\\s*$', '') | regex_replace('\\s+', ' ') | regex_replace('^,|,$', '') | trim }}"
 
     - name: Debug join command
       debug:
@@ -325,12 +336,8 @@
         msg: "Join command is empty. Check if kubeadm init completed successfully on master node."
       when: join_command == ""
 
-    - name: Split join command into list
-      set_fact:
-        join_command_parts: "{{ join_command.split() }}"
-
     - name: Join worker node
-      command: "{{ join_command_parts }}"
+      shell: "{{ join_command }}"
       when: join_command != ""
       register: join_result
 
