@@ -36,7 +36,7 @@ resource "helm_release" "cert_manager" {
   repository = "https://charts.jetstack.io"
   chart      = "cert-manager"
   version    = var.cert_manager_chart_version
-  namespace  = kubernetes_namespace.cert_manager[0].metadata[0].name
+  namespace  = kubernetes_namespace.cert_manager.metadata[0].name
 
   set {
     name  = "installCRDs"
@@ -110,7 +110,7 @@ resource "helm_release" "rancher" {
   repository = "https://releases.rancher.com/server-charts/latest"
   chart      = "rancher"
   version    = var.rancher_chart_version
-  namespace  = kubernetes_namespace.rancher[0].metadata[0].name
+  namespace  = kubernetes_namespace.rancher.metadata[0].name
 
   set {
     name  = "hostname"
@@ -190,7 +190,7 @@ resource "kubernetes_ingress_v1" "rancher" {
 
   metadata {
     name      = "rancher-external-ingress"
-    namespace = kubernetes_namespace.rancher[0].metadata[0].name
+    namespace = kubernetes_namespace.rancher.metadata[0].name
     annotations = {
       "kubernetes.io/ingress.class"                = var.ingress_class
       "cert-manager.io/cluster-issuer"             = var.letsencrypt_issuer_name
