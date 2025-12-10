@@ -101,9 +101,78 @@ check_and_install_terraform() {
     fi
 }
 
-# Check Terraform installation
+# Function to check and install Helm
+check_and_install_helm() {
+    if command -v helm &> /dev/null; then
+        HELM_VERSION=$(helm version --short 2>/dev/null || helm version | head -n1)
+        echo "✓ Helm is installed: $HELM_VERSION"
+        return 0
+    fi
+    
+    echo "Helm is not installed. Attempting to install..."
+    
+    # Detect OS
+    OS=$(uname -s)
+    ARCH=$(uname -m)
+    
+    # Map architecture
+    case $ARCH in
+        x86_64) HELM_ARCH="amd64" ;;
+        arm64|aarch64) HELM_ARCH="arm64" ;;
+        *) HELM_ARCH="amd64" ;;
+    esac
+    
+    # Install Helm based on OS
+    if [ "$OS" == "Linux" ]; then
+        HELM_VERSION="3.13.0"
+        HELM_URL="https://get.helm.sh/helm-v${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz"
+        
+        echo "Downloading Helm..."
+        cd /tmp
+        curl -LO "$HELM_URL" || wget "$HELM_URL"
+        tar -zxvf helm-v${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz
+        sudo mv linux-${HELM_ARCH}/helm /usr/local/bin/
+        rm -rf linux-${HELM_ARCH} helm-v${HELM_VERSION}-linux-${HELM_ARCH}.tar.gz
+        cd - > /dev/null
+        
+    elif [ "$OS" == "Darwin" ]; then
+        # macOS - try Homebrew first
+        if command -v brew &> /dev/null; then
+            echo "Installing Helm via Homebrew..."
+            brew install helm
+        else
+            # Fallback to manual download
+            HELM_VERSION="3.13.0"
+            HELM_URL="https://get.helm.sh/helm-v${HELM_VERSION}-darwin-${HELM_ARCH}.tar.gz"
+            
+            echo "Downloading Helm..."
+            cd /tmp
+            curl -LO "$HELM_URL"
+            tar -zxvf helm-v${HELM_VERSION}-darwin-${HELM_ARCH}.tar.gz
+            sudo mv darwin-${HELM_ARCH}/helm /usr/local/bin/
+            rm -rf darwin-${HELM_ARCH} helm-v${HELM_VERSION}-darwin-${HELM_ARCH}.tar.gz
+            cd - > /dev/null
+        fi
+    else
+        echo "Error: Unsupported OS: $OS"
+        echo "Please install Helm manually from https://helm.sh/docs/intro/install/"
+        exit 1
+    fi
+    
+    # Verify installation
+    if command -v helm &> /dev/null; then
+        echo "✓ Helm installed successfully"
+        return 0
+    else
+        echo "Error: Helm installation failed. Please install manually."
+        exit 1
+    fi
+}
+
+# Check dependencies
 echo "Checking dependencies..."
 check_and_install_terraform
+check_and_install_helm
 
 cd terraform
 
