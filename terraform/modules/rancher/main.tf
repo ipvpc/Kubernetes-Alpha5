@@ -75,38 +75,59 @@ resource "helm_release" "cert_manager" {
   timeout = 600
 }
 
-# Wait for cert-manager CRDs to be available before creating ClusterIssuer
+# Wait for cert-manager CRDs to be installed and registered
+# CRDs can take time to be fully registered with the API server after Helm installs them
+resource "time_sleep" "wait_for_cert_manager_crds" {
+  count = var.enable_rancher && var.enable_letsencrypt ? 1 : 0
+
+  depends_on = [helm_release.cert_manager]
+  
+  # Wait 30 seconds for CRDs to be installed and registered
+  create_duration = "30s"
+}
+
+# Verify cert-manager CRDs are available before creating ClusterIssuer
 # This ensures the ClusterIssuer CRD is registered with the API server
-resource "null_resource" "wait_for_cert_manager_crds" {
+resource "null_resource" "verify_cert_manager_crds" {
   count = var.enable_rancher && var.enable_letsencrypt ? 1 : 0
 
   provisioner "local-exec" {
     command = <<-EOT
       set -e
-      echo "Waiting for cert-manager CRDs to be available..."
-      max_attempts=60
+      echo "Verifying cert-manager CRDs are available..."
+      
+      max_attempts=40
       attempt=0
       while [ $attempt -lt $max_attempts ]; do
+        # kubectl will use KUBECONFIG env var or default ~/.kube/config
         if kubectl get crd clusterissuers.cert-manager.io >/dev/null 2>&1; then
           echo "✓ cert-manager CRDs are available!"
-          # Give it a few more seconds to ensure CRD is fully registered
-          sleep 5
-          exit 0
+          # Additional check: verify the CRD is fully registered
+          if kubectl api-resources | grep -q "clusterissuers.cert-manager.io"; then
+            echo "✓ ClusterIssuer CRD is fully registered with API server"
+            exit 0
+          fi
         fi
         attempt=$((attempt + 1))
         echo "Attempt $attempt/$max_attempts: CRDs not ready yet, waiting 5 seconds..."
         sleep 5
       done
-      echo "ERROR: cert-manager CRDs not available after $max_attempts attempts (5 minutes)"
+      echo "ERROR: cert-manager CRDs not available after $max_attempts attempts"
+      echo "Please check cert-manager installation: kubectl get pods -n ${var.cert_manager_namespace}"
+      echo "You can manually check with: kubectl get crd clusterissuers.cert-manager.io"
       exit 1
     EOT
   }
 
-  depends_on = [helm_release.cert_manager]
+  depends_on = [
+    helm_release.cert_manager,
+    time_sleep.wait_for_cert_manager_crds
+  ]
   
   # Trigger re-run if cert-manager is recreated
   triggers = {
     cert_manager_release = helm_release.cert_manager[0].id
+    cert_manager_namespace = var.cert_manager_namespace
   }
 }
 
@@ -140,7 +161,8 @@ resource "kubernetes_manifest" "letsencrypt_issuer" {
 
   depends_on = [
     helm_release.cert_manager,
-    null_resource.wait_for_cert_manager_crds
+    time_sleep.wait_for_cert_manager_crds,
+    null_resource.verify_cert_manager_crds
   ]
 }
 
