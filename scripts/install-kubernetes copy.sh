@@ -9,7 +9,7 @@ set -e
 
 ENVIRONMENT=${1:-manager}
 INSTALL_METHOD=${2:-kubeadm}
-INVENTORY_FILE="ansible/inventory-mgt.yml"
+INVENTORY_FILE="ansible/inventory.yml"
 
 # Colors for output
 RED='\033[0;31m'
