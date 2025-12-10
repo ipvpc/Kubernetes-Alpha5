@@ -199,14 +199,7 @@
 
     - name: Set CRI socket path
       set_fact:
-        cri_socket: >-
-          {% if container_runtime == "containerd" %}
-          unix:///var/run/containerd/containerd.sock
-          {% elif container_runtime == "crio" %}
-          unix:///var/run/crio/crio.sock
-          {% else %}
-          unix:///var/run/containerd/containerd.sock
-          {% endif %}
+        cri_socket: "{% if container_runtime == 'containerd' %}unix:///var/run/containerd/containerd.sock{% elif container_runtime == 'crio' %}unix:///var/run/crio/crio.sock{% else %}unix:///var/run/containerd/containerd.sock{% endif %}"
 
     - name: Initialize Kubernetes cluster
       shell: >
