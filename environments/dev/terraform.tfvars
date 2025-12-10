@@ -43,6 +43,16 @@ app_configs = {
   }
 }
 
+# Rancher Configuration (optional for dev)
+enable_rancher = false
+# Uncomment and configure if you want Rancher in dev environment
+# enable_rancher = true
+# rancher_hostname = "rancher-dev.example.com"
+# rancher_bootstrap_password = "DevPassword123!"
+# rancher_replicas = 1
+# enable_letsencrypt = false
+# letsencrypt_email = "dev@example.com"
+
 common_labels = {
   managed-by = "terraform"
   project    = "alpha5-finance"

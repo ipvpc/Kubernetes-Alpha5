@@ -1,9 +1,9 @@
 variable "environment" {
-  description = "Environment name (dev, staging, prod)"
+  description = "Environment name (dev, staging, prod, manager)"
   type        = string
   validation {
-    condition     = contains(["dev", "staging", "prod"], var.environment)
-    error_message = "Environment must be one of: dev, staging, prod"
+    condition     = contains(["dev", "staging", "prod", "manager"], var.environment)
+    error_message = "Environment must be one of: dev, staging, prod, manager"
   }
 }
 
@@ -83,5 +83,95 @@ variable "grafana_ingress_host" {
   description = "Grafana ingress hostname"
   type        = string
   default     = "grafana.example.com"
+}
+
+# Rancher Variables
+variable "enable_rancher" {
+  description = "Enable Rancher deployment"
+  type        = bool
+  default     = false
+}
+
+variable "rancher_hostname" {
+  description = "Rancher hostname (FQDN) - required if enable_rancher is true"
+  type        = string
+  default     = "rancher.example.com"
+}
+
+variable "rancher_bootstrap_password" {
+  description = "Rancher bootstrap password for admin user"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "rancher_replicas" {
+  description = "Number of Rancher replicas (recommended: 3 for HA)"
+  type        = number
+  default     = 3
+}
+
+variable "rancher_tls_source" {
+  description = "TLS certificate source for Rancher (rancher, letsEncrypt, secret)"
+  type        = string
+  default     = "letsEncrypt"
+  validation {
+    condition     = contains(["rancher", "letsEncrypt", "secret"], var.rancher_tls_source)
+    error_message = "TLS source must be one of: rancher, letsEncrypt, secret"
+  }
+}
+
+variable "rancher_ingress_class" {
+  description = "Ingress class for Rancher"
+  type        = string
+  default     = "nginx"
+}
+
+variable "enable_letsencrypt" {
+  description = "Enable Let's Encrypt for Rancher TLS certificates"
+  type        = bool
+  default     = true
+}
+
+variable "letsencrypt_email" {
+  description = "Email address for Let's Encrypt registration"
+  type        = string
+  default     = "admin@example.com"
+}
+
+variable "letsencrypt_issuer_name" {
+  description = "Let's Encrypt ClusterIssuer name"
+  type        = string
+  default     = "letsencrypt-prod"
+}
+
+variable "rancher_cpu_request" {
+  description = "Rancher CPU request per replica"
+  type        = string
+  default     = "1000m"
+}
+
+variable "rancher_memory_request" {
+  description = "Rancher memory request per replica"
+  type        = string
+  default     = "2Gi"
+}
+
+variable "rancher_cpu_limit" {
+  description = "Rancher CPU limit per replica"
+  type        = string
+  default     = "2000m"
+}
+
+variable "rancher_memory_limit" {
+  description = "Rancher memory limit per replica"
+  type        = string
+  default     = "4Gi"
+}
+
+variable "rancher_additional_settings" {
+  description = "Additional Rancher Helm chart settings (key-value pairs)"
+  type        = map(string)
+  default     = {}
 }
 

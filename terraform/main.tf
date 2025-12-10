@@ -56,6 +56,28 @@ module "monitoring" {
   grafana_ingress_host   = var.grafana_ingress_host
 }
 
+# Deploy Rancher (optional)
+module "rancher" {
+  count = var.enable_rancher ? 1 : 0
+
+  source = "./modules/rancher"
+
+  environment              = var.environment
+  rancher_hostname         = var.rancher_hostname
+  rancher_bootstrap_password = var.rancher_bootstrap_password
+  rancher_replicas         = var.rancher_replicas
+  rancher_tls_source       = var.rancher_tls_source
+  ingress_class            = var.rancher_ingress_class
+  enable_letsencrypt       = var.enable_letsencrypt
+  letsencrypt_email        = var.letsencrypt_email
+  letsencrypt_issuer_name  = var.letsencrypt_issuer_name
+  rancher_cpu_request      = var.rancher_cpu_request
+  rancher_memory_request   = var.rancher_memory_request
+  rancher_cpu_limit        = var.rancher_cpu_limit
+  rancher_memory_limit     = var.rancher_memory_limit
+  rancher_additional_settings = var.rancher_additional_settings
+}
+
 # Deploy applications using modules
 module "applications" {
   source = "./modules/applications"

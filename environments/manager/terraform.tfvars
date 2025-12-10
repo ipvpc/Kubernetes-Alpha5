@@ -1,0 +1,45 @@
+# Manager Cluster Configuration
+# This environment is for deploying Rancher and management tools
+
+environment = "manager"
+
+kubeconfig_path    = "~/.kube/config"
+kubeconfig_context = ""
+
+# Enable Rancher for management cluster
+enable_rancher = true
+
+# Rancher Configuration
+rancher_hostname         = "rancher.example.com"  # Change to your domain
+rancher_bootstrap_password = "ChangeMe123!"        # Change to a secure password
+rancher_replicas         = 3                       # HA setup with 3 replicas
+rancher_tls_source       = "letsEncrypt"           # Options: rancher, letsEncrypt, secret
+rancher_ingress_class     = "nginx"
+
+# Let's Encrypt Configuration
+enable_letsencrypt       = true
+letsencrypt_email        = "admin@example.com"     # Change to your email
+letsencrypt_issuer_name  = "letsencrypt-prod"
+
+# Rancher Resource Configuration
+rancher_cpu_request    = "1000m"
+rancher_memory_request = "2Gi"
+rancher_cpu_limit      = "2000m"
+rancher_memory_limit   = "4Gi"
+
+# Enable Ingress Controller (required for Rancher)
+enable_ingress_controller = true
+
+# Optional: Enable monitoring for the manager cluster
+enable_monitoring = false
+
+# No application deployments in manager cluster (only Rancher)
+app_configs = {}
+
+common_labels = {
+  managed-by = "terraform"
+  project    = "alpha5-finance"
+  team       = "platform"
+  cluster-type = "manager"
+}
+

@@ -6,6 +6,7 @@ A comprehensive Terraform-based solution for deploying Kubernetes clusters and a
 
 - 🚀 **Multi-Environment Support**: Separate configurations for dev, staging, and production
 - 📦 **Application Deployment**: Deploy multiple applications with configurable resources
+- 🐄 **Rancher Management**: Deploy Rancher for Kubernetes cluster management
 - 🔒 **Security**: Namespace isolation and resource limits
 - 📊 **Monitoring**: Optional Prometheus and Grafana integration
 - 🌐 **Ingress**: Optional NGINX Ingress Controller deployment
@@ -30,14 +31,17 @@ A comprehensive Terraform-based solution for deploying Kubernetes clusters and a
 │   └── modules/
 │       ├── applications/       # Application deployment module
 │       ├── monitoring/         # Monitoring stack module
-│       └── ingress/            # Ingress controller module
+│       ├── ingress/            # Ingress controller module
+│       └── rancher/            # Rancher management platform module
 ├── environments/
 │   ├── dev/
 │   │   └── terraform.tfvars   # Development environment config
 │   ├── staging/
 │   │   └── terraform.tfvars   # Staging environment config
-│   └── prod/
-│       └── terraform.tfvars   # Production environment config
+│   ├── prod/
+│   │   └── terraform.tfvars   # Production environment config
+│   └── manager/
+│       └── terraform.tfvars   # Manager cluster config (Rancher)
 └── scripts/
     ├── deploy.sh              # Bash deployment script
     └── deploy.ps1             # PowerShell deployment script
@@ -186,6 +190,22 @@ Add to your `terraform.tfvars`:
 ```hcl
 enable_ingress_controller = true
 ```
+
+### Deploying Rancher
+
+For a management cluster, deploy Rancher:
+
+```hcl
+enable_rancher = true
+rancher_hostname = "rancher.yourdomain.com"
+rancher_bootstrap_password = "YourSecurePassword123!"
+rancher_replicas = 3
+enable_letsencrypt = true
+letsencrypt_email = "admin@example.com"
+enable_ingress_controller = true
+```
+
+See [RANCHER_DEPLOYMENT.md](RANCHER_DEPLOYMENT.md) for detailed Rancher deployment instructions.
 
 ## Modules
 
