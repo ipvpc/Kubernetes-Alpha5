@@ -197,6 +197,17 @@
       set_fact:
         master_ip: "{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}"
 
+    - name: Set CRI socket path
+      set_fact:
+        cri_socket: >-
+          {% if container_runtime == "containerd" %}
+          unix:///var/run/containerd/containerd.sock
+          {% elif container_runtime == "crio" %}
+          unix:///var/run/crio/crio.sock
+          {% else %}
+          unix:///var/run/containerd/containerd.sock
+          {% endif %}
+
     - name: Initialize Kubernetes cluster
       command: >
         kubeadm init
@@ -204,6 +215,7 @@
         --service-cidr={{ service_cidr }}
         --control-plane-endpoint={{ master_ip }}:6443
         --upload-certs
+        --cri-socket={{ cri_socket }}
       register: kubeadm_init
       changed_when: true
 
