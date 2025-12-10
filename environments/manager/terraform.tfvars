@@ -10,15 +10,15 @@ kubeconfig_context = ""
 enable_rancher = true
 
 # Rancher Configuration
-rancher_hostname         = "rancher.example.com"  # Change to your domain
-rancher_bootstrap_password = "ChangeMe123!"        # Change to a secure password
+rancher_hostname         = "rancher.alpha5.finance"  # Change to your domain
+rancher_bootstrap_password = "p0w3rb4r"        # Change to a secure password
 rancher_replicas         = 3                       # HA setup with 3 replicas
 rancher_tls_source       = "letsEncrypt"           # Options: rancher, letsEncrypt, secret
 rancher_ingress_class     = "nginx"
 
 # Let's Encrypt Configuration
 enable_letsencrypt       = true
-letsencrypt_email        = "admin@example.com"     # Change to your email
+letsencrypt_email        = "nfernandes@alpha5cloud.com"     # Change to your email
 letsencrypt_issuer_name  = "letsencrypt-prod"
 
 # Rancher Resource Configuration

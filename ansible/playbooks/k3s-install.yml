@@ -1,0 +1,146 @@
+---
+# Ansible Playbook: Install Kubernetes using k3s
+# k3s is a lightweight Kubernetes distribution, ideal for edge and development
+
+- name: Install Kubernetes with k3s
+  hosts: all
+  become: true
+  gather_facts: true
+  
+  vars:
+    k3s_token: "{{ k3s_token | default(lookup('password', '/dev/null length=64 chars=ascii_letters,digits')) }}"
+    
+  tasks:
+    - name: Check if running on supported OS
+      assert:
+        that:
+          - ansible_os_family == "Debian" or ansible_os_family == "RedHat"
+        fail_msg: "Unsupported OS family: {{ ansible_os_family }}"
+        success_msg: "OS family {{ ansible_os_family }} is supported"
+
+    - name: Disable swap
+      shell: |
+        swapoff -a
+        sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+      when: disable_swap | bool
+      changed_when: false
+
+    - name: Load required kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - overlay
+        - br_netfilter
+      when: load_kernel_modules | bool
+
+    - name: Configure sysctl parameters
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+        reload: true
+      loop:
+        - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { key: 'net.ipv4.ip_forward', value: '1' }
+      when: enable_ip_forwarding | bool
+
+    - name: Get first control plane node IP
+      set_fact:
+        k3s_server_ip: "{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}"
+      when: is_control_plane | default(false)
+
+    - name: Install k3s server (first master)
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} \
+        K3S_TOKEN={{ k3s_token }} \
+        sh -s - server \
+        --cluster-init \
+        --tls-san {{ k3s_server_ip }}
+      when: 
+        - is_control_plane | default(false)
+        - inventory_hostname == groups['control_plane'][0]
+
+    - name: Install k3s server (additional masters)
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} \
+        K3S_TOKEN={{ k3s_token }} \
+        K3S_URL=https://{{ k3s_server_ip }}:6443 \
+        sh -s - server
+      when:
+        - is_control_plane | default(false)
+        - inventory_hostname != groups['control_plane'][0]
+
+    - name: Install k3s agent (workers)
+      shell: |
+        curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION={{ k3s_version }} \
+        K3S_TOKEN={{ k3s_token }} \
+        K3S_URL=https://{{ k3s_server_ip }}:6443 \
+        sh -s - agent
+      when: is_control_plane | default(false) == false
+
+    - name: Wait for k3s to be ready (control plane)
+      wait_for:
+        path: /etc/rancher/k3s/k3s.yaml
+        timeout: 300
+      when: is_control_plane | default(false)
+
+    - name: Create .kube directory (control plane)
+      file:
+        path: /root/.kube
+        state: directory
+        mode: '0755'
+      when: is_control_plane | default(false)
+
+    - name: Copy k3s kubeconfig (control plane)
+      copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: /root/.kube/config
+        remote_src: true
+        mode: '0644'
+      when: is_control_plane | default(false)
+
+    - name: Update kubeconfig server URL (control plane)
+      replace:
+        path: /root/.kube/config
+        regexp: '127\.0\.0\.1:6443'
+        replace: '{{ k3s_server_ip }}:6443'
+      when: is_control_plane | default(false)
+
+    - name: Configure firewall (UFW)
+      ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.protocol }}"
+      loop: "{{ firewall_ports }}"
+      when: 
+        - configure_firewall | bool
+        - ansible_os_family == "Debian"
+
+    - name: Configure firewall (firewalld)
+      firewalld:
+        port: "{{ item.port }}/{{ item.protocol }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop: "{{ firewall_ports }}"
+      when:
+        - configure_firewall | bool
+        - ansible_os_family == "RedHat"
+
+    - name: Verify k3s installation (control plane)
+      command: kubectl get nodes
+      environment:
+        KUBECONFIG: /root/.kube/config
+      register: k3s_nodes
+      changed_when: false
+      when: is_control_plane | default(false)
+
+    - name: Display cluster nodes
+      debug:
+        var: k3s_nodes.stdout_lines
+      when: 
+        - is_control_plane | default(false)
+        - k3s_nodes is defined

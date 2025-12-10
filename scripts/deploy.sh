@@ -9,8 +9,8 @@ set -e
 ENVIRONMENT=${1:-dev}
 ACTION=${2:-plan}
 
-if [[ ! "$ENVIRONMENT" =~ ^(dev|staging|prod)$ ]]; then
-    echo "Error: Environment must be one of: dev, staging, prod"
+if [[ ! "$ENVIRONMENT" =~ ^(dev|staging|prod|manager)$ ]]; then
+    echo "Error: Environment must be one of: dev, staging, prod, manager"
     exit 1
 fi
 
@@ -24,6 +24,78 @@ echo "Terraform Kubernetes Deployment"
 echo "Environment: $ENVIRONMENT"
 echo "Action: $ACTION"
 echo "=========================================="
+
+# Function to check and install Terraform
+check_and_install_terraform() {
+    if command -v terraform &> /dev/null; then
+        TERRAFORM_VERSION=$(terraform version | head -n1)
+        echo "✓ Terraform is installed: $TERRAFORM_VERSION"
+        return 0
+    fi
+    
+    echo "Terraform is not installed. Attempting to install..."
+    
+    # Detect OS
+    OS=$(uname -s)
+    ARCH=$(uname -m)
+    
+    # Map architecture
+    case $ARCH in
+        x86_64) TERRAFORM_ARCH="amd64" ;;
+        arm64|aarch64) TERRAFORM_ARCH="arm64" ;;
+        *) TERRAFORM_ARCH="amd64" ;;
+    esac
+    
+    # Install Terraform based on OS
+    if [ "$OS" == "Linux" ]; then
+        TERRAFORM_VERSION="1.6.0"
+        TERRAFORM_URL="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip"
+        
+        echo "Downloading Terraform..."
+        cd /tmp
+        curl -LO "$TERRAFORM_URL" || wget "$TERRAFORM_URL"
+        unzip -o terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip
+        sudo mv terraform /usr/local/bin/
+        rm terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip
+        cd - > /dev/null
+        
+    elif [ "$OS" == "Darwin" ]; then
+        # macOS - try Homebrew first
+        if command -v brew &> /dev/null; then
+            echo "Installing Terraform via Homebrew..."
+            brew install terraform
+        else
+            # Fallback to manual download
+            TERRAFORM_VERSION="1.6.0"
+            TERRAFORM_URL="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_darwin_${TERRAFORM_ARCH}.zip"
+            
+            echo "Downloading Terraform..."
+            cd /tmp
+            curl -LO "$TERRAFORM_URL"
+            unzip -o terraform_${TERRAFORM_VERSION}_darwin_${TERRAFORM_ARCH}.zip
+            sudo mv terraform /usr/local/bin/
+            rm terraform_${TERRAFORM_VERSION}_darwin_${TERRAFORM_ARCH}.zip
+            cd - > /dev/null
+        fi
+    else
+        echo "Error: Unsupported OS: $OS"
+        echo "Please install Terraform manually from https://www.terraform.io/downloads"
+        exit 1
+    fi
+    
+    # Verify installation
+    if command -v terraform &> /dev/null; then
+        echo "✓ Terraform installed successfully"
+        return 0
+    else
+        echo "Error: Terraform installation failed. Please install manually."
+        exit 1
+    fi
+}
+
+# Check Terraform installation
+echo "Checking dependencies..."
+check_and_install_terraform
 
 cd terraform
 

@@ -1,0 +1,38 @@
+# Default variables for all hosts
+
+# Kubernetes Configuration
+kubernetes_version: "1.28.0"
+container_runtime: "containerd"
+pod_network_cidr: "10.244.0.0/16"
+service_cidr: "10.96.0.0/12"
+
+# Installation Method: kubeadm, k3s, or rke2
+install_method: "kubeadm"
+
+# System Requirements
+disable_swap: true
+enable_ip_forwarding: true
+load_kernel_modules: true
+
+# Firewall (if enabled)
+configure_firewall: true
+firewall_ports:
+  - { port: 6443, protocol: tcp, description: "Kubernetes API" }
+  - { port: 2379, protocol: tcp, description: "etcd" }
+  - { port: 2380, protocol: tcp, description: "etcd" }
+  - { port: 10250, protocol: tcp, description: "Kubelet API" }
+  - { port: 10259, protocol: tcp, description: "kube-scheduler" }
+  - { port: 10257, protocol: tcp, description: "kube-controller-manager" }
+  - { port: 30000, protocol: tcp, description: "NodePort Services" }
+  - { port: 30000, protocol: udp, description: "NodePort Services" }
+
+# CNI Plugin: flannel, calico, or weave
+cni_plugin: "flannel"
+
+# K3s specific
+k3s_version: "latest"
+k3s_token: ""  # Auto-generated if empty
+
+# RKE2 specific
+rke2_version: "latest"
+rke2_token: ""  # Auto-generated if empty

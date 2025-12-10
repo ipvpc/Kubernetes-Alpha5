@@ -1,0 +1,261 @@
+---
+# Ansible Playbook: Install Kubernetes using kubeadm
+# This playbook installs Kubernetes on remote hosts using kubeadm
+
+- name: Install Kubernetes with kubeadm
+  hosts: all
+  become: true
+  gather_facts: true
+  
+  vars:
+    kubeadm_init_token: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+    
+  tasks:
+    - name: Check if running on supported OS
+      assert:
+        that:
+          - ansible_os_family == "Debian" or ansible_os_family == "RedHat"
+        fail_msg: "Unsupported OS family: {{ ansible_os_family }}"
+        success_msg: "OS family {{ ansible_os_family }} is supported"
+
+    - name: Disable swap
+      shell: |
+        swapoff -a
+        sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+      when: disable_swap | bool
+      changed_when: false
+
+    - name: Load required kernel modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - overlay
+        - br_netfilter
+      when: load_kernel_modules | bool
+
+    - name: Configure sysctl parameters
+      sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_file: /etc/sysctl.d/99-kubernetes.conf
+        reload: true
+      loop:
+        - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+        - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+        - { key: 'net.ipv4.ip_forward', value: '1' }
+      when: enable_ip_forwarding | bool
+
+    - name: Install required packages (Debian/Ubuntu)
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Install required packages (RedHat/CentOS)
+      yum:
+        name:
+          - yum-utils
+          - device-mapper-persistent-data
+          - lvm2
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Add Kubernetes GPG key (Debian/Ubuntu)
+      apt_key:
+        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Add Kubernetes repository (Debian/Ubuntu)
+      apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        state: present
+        filename: kubernetes
+      when: ansible_os_family == "Debian"
+
+    - name: Add Kubernetes repository (RedHat/CentOS)
+      yum_repository:
+        name: kubernetes
+        description: Kubernetes
+        baseurl: https://pkgs.k8s.io/core:/stable:/v1.28/rpm/
+        gpgcheck: yes
+        gpgkey: https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key
+        enabled: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install container runtime (containerd)
+      block:
+        - name: Install containerd (Debian/Ubuntu)
+          apt:
+            name:
+              - containerd
+            state: present
+          when: ansible_os_family == "Debian"
+
+        - name: Install containerd (RedHat/CentOS)
+          yum:
+            name:
+              - containerd.io
+            state: present
+          when: ansible_os_family == "RedHat"
+
+        - name: Configure containerd
+          copy:
+            content: |
+              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+                  SystemdCgroup = true
+            dest: /etc/containerd/config.toml
+            mode: '0644'
+          notify: restart containerd
+
+        - name: Enable and start containerd
+          systemd:
+            name: containerd
+            enabled: true
+            state: started
+      when: container_runtime == "containerd"
+
+    - name: Install kubeadm, kubelet, kubectl
+      package:
+        name:
+          - kubelet={{ kubernetes_version }}-1.1
+          - kubectl={{ kubernetes_version }}-1.1
+          - kubeadm={{ kubernetes_version }}-1.1
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install kubeadm, kubelet, kubectl (RedHat)
+      yum:
+        name:
+          - kubelet-{{ kubernetes_version }}-1.1
+          - kubectl-{{ kubernetes_version }}-1.1
+          - kubeadm-{{ kubernetes_version }}-1.1
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Hold kubelet, kubeadm, kubectl (Debian/Ubuntu)
+      dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+      when: ansible_os_family == "Debian"
+
+    - name: Enable kubelet service
+      systemd:
+        name: kubelet
+        enabled: true
+        daemon_reload: true
+
+    - name: Configure firewall (UFW)
+      ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.protocol }}"
+      loop: "{{ firewall_ports }}"
+      when: 
+        - configure_firewall | bool
+        - ansible_os_family == "Debian"
+
+    - name: Configure firewall (firewalld)
+      firewalld:
+        port: "{{ item.port }}/{{ item.protocol }}"
+        permanent: true
+        state: enabled
+        immediate: true
+      loop: "{{ firewall_ports }}"
+      when:
+        - configure_firewall | bool
+        - ansible_os_family == "RedHat"
+
+  handlers:
+    - name: restart containerd
+      systemd:
+        name: containerd
+        state: restarted
+
+- name: Initialize Kubernetes cluster (first master only)
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Get master node IP
+      set_fact:
+        master_ip: "{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}"
+
+    - name: Initialize Kubernetes cluster
+      command: >
+        kubeadm init
+        --pod-network-cidr={{ pod_network_cidr }}
+        --service-cidr={{ service_cidr }}
+        --control-plane-endpoint={{ master_ip }}:6443
+        --upload-certs
+      register: kubeadm_init
+      changed_when: true
+
+    - name: Save kubeadm join command for control plane
+      set_fact:
+        kubeadm_join_command: "{{ kubeadm_init.stdout_lines | select('match', 'kubeadm join') | list | first }}"
+
+    - name: Save kubeadm join command for workers
+      set_fact:
+        kubeadm_join_command_worker: "{{ kubeadm_init.stdout_lines | select('match', 'kubeadm join') | list | last }}"
+
+    - name: Create .kube directory
+      file:
+        path: /root/.kube
+        state: directory
+        mode: '0755'
+
+    - name: Copy kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        remote_src: true
+        mode: '0644'
+
+    - name: Install CNI plugin (Flannel)
+      shell: |
+        kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      when: cni_plugin == "flannel"
+      environment:
+        KUBECONFIG: /root/.kube/config
+
+    - name: Install CNI plugin (Calico)
+      shell: |
+        kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml
+      when: cni_plugin == "calico"
+      environment:
+        KUBECONFIG: /root/.kube/config
+
+- name: Join additional control plane nodes
+  hosts: control_plane[1:]
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Join control plane node
+      shell: "{{ hostvars[groups['control_plane'][0]]['kubeadm_join_command'] }}"
+      when: kubeadm_join_command is defined
+
+- name: Join worker nodes
+  hosts: workers
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Join worker node
+      shell: "{{ hostvars[groups['control_plane'][0]]['kubeadm_join_command_worker'] }}"
+      when: kubeadm_join_command_worker is defined

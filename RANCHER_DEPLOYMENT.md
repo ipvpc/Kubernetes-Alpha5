@@ -9,11 +9,32 @@ Rancher is a complete software stack for teams adopting containers. It addresses
 ## Prerequisites
 
 1. **Kubernetes Cluster**: A running Kubernetes cluster (v1.24+ recommended)
+   - **New to Kubernetes?** See [KUBERNETES_INSTALLATION.md](./KUBERNETES_INSTALLATION.md) for automated installation on remote hosts
 2. **kubectl**: Configured and connected to your cluster
 3. **Helm**: Version 3.x installed
 4. **Ingress Controller**: NGINX Ingress Controller (will be deployed automatically if enabled)
 5. **DNS**: A DNS record pointing to your cluster's ingress IP
 6. **Terraform**: Version >= 1.0
+
+## Automated Kubernetes Installation
+
+If you don't have a Kubernetes cluster yet, you can automatically install one on remote hosts using Ansible:
+
+```bash
+# Install Kubernetes on remote hosts
+./scripts/install-kubernetes.sh manager kubeadm
+
+# Or using k3s (lightweight)
+./scripts/install-kubernetes.sh manager k3s
+```
+
+This will:
+1. Install Kubernetes on all configured remote hosts
+2. Set up the cluster (control plane + workers)
+3. Download the kubeconfig to `~/.kube/config-manager`
+4. Verify the cluster is ready
+
+See [KUBERNETES_INSTALLATION.md](./KUBERNETES_INSTALLATION.md) for detailed instructions.
 
 ## Quick Start
 

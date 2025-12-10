@@ -1,0 +1,10 @@
+---
+# Main Ansible Playbook
+# This playbook orchestrates Kubernetes installation based on install_method
+# Usage: ansible-playbook site.yml -i inventory.yml
+
+- import_playbook: kubeadm-install.yml
+  when: install_method == "kubeadm"
+
+- import_playbook: k3s-install.yml
+  when: install_method == "k3s"
