@@ -9,17 +9,28 @@
 #   }
 # }
 
+# Locals for kubeconfig path expansion
+locals {
+  # Expand ~ to home directory if kubeconfig_path is provided
+  # If kubeconfig_path is null or empty, leave as null to use default kubeconfig discovery
+  kubeconfig_path_expanded = var.kubeconfig_path != null && var.kubeconfig_path != "" ? (
+    substr(var.kubeconfig_path, 0, 1) == "~" ? replace(var.kubeconfig_path, "~", pathexpand("~")) : var.kubeconfig_path
+  ) : null
+}
+
 # Configure Kubernetes Provider
+# Note: If config_path is null, provider will use default kubeconfig discovery
+# (KUBECONFIG env var or ~/.kube/config)
 provider "kubernetes" {
-  config_path    = var.kubeconfig_path
-  config_context = var.kubeconfig_context
+  config_path    = local.kubeconfig_path_expanded
+  config_context = var.kubeconfig_context != "" ? var.kubeconfig_context : null
 }
 
 # Configure Helm Provider
 provider "helm" {
   kubernetes {
-    config_path    = var.kubeconfig_path
-    config_context = var.kubeconfig_context
+    config_path    = local.kubeconfig_path_expanded
+    config_context = var.kubeconfig_context != "" ? var.kubeconfig_context : null
   }
 }
 

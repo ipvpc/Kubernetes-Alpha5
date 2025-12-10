@@ -8,9 +8,10 @@ variable "environment" {
 }
 
 variable "kubeconfig_path" {
-  description = "Path to kubeconfig file"
+  description = "Path to kubeconfig file (leave null/empty to use default kubeconfig discovery via KUBECONFIG env var or ~/.kube/config)"
   type        = string
-  default     = "~/.kube/config"
+  default     = null
+  nullable    = true
 }
 
 variable "kubeconfig_context" {
