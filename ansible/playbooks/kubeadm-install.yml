@@ -209,13 +209,13 @@
           {% endif %}
 
     - name: Initialize Kubernetes cluster
-      command: kubeadm init
-      args:
-        - --pod-network-cidr={{ pod_network_cidr }}
-        - --service-cidr={{ service_cidr }}
-        - --control-plane-endpoint={{ master_ip }}:6443
-        - --upload-certs
-        - --cri-socket={{ cri_socket }}
+      shell: >
+        kubeadm init
+        --pod-network-cidr={{ pod_network_cidr }}
+        --service-cidr={{ service_cidr }}
+        --control-plane-endpoint={{ master_ip }}:6443
+        --upload-certs
+        --cri-socket={{ cri_socket }}
       register: kubeadm_init
       changed_when: true
 
