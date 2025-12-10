@@ -326,9 +326,19 @@
       set_fact:
         join_command: "{{ (join_command_raw | default('')) | string | replace('[', '') | replace(']', '') | replace(\"'\", '') | replace('\"', '') | regex_replace('\\\\\\s*$', '') | regex_replace('\\s+', ' ') | regex_replace('^,|,$', '') | trim }}"
 
+    - name: Add CRI socket to join command
+      set_fact:
+        join_command_with_cri: "{{ join_command }} --cri-socket={{ cri_socket }}"
+      when: join_command != "" and join_command is not regex_search('--cri-socket')
+
+    - name: Use original join command if CRI socket already present
+      set_fact:
+        join_command_with_cri: "{{ join_command }}"
+      when: join_command != "" and join_command is regex_search('--cri-socket')
+
     - name: Debug join command
       debug:
-        msg: "Join command for {{ inventory_hostname }}: {{ join_command }}"
+        msg: "Join command for {{ inventory_hostname }}: {{ join_command_with_cri | default(join_command) }}"
       when: join_command != ""
 
     - name: Fail if join command is empty
@@ -337,7 +347,7 @@
       when: join_command == ""
 
     - name: Join worker node
-      shell: "{{ join_command }}"
+      shell: "{{ join_command_with_cri | default(join_command) }}"
       when: join_command != ""
       register: join_result
 
