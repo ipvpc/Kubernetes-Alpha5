@@ -1,6 +1,8 @@
 environment = "staging"
 
-kubeconfig_path    = "~/.kube/config"
+# kubeconfig_path - leave null to use KUBECONFIG env var or default ~/.kube/config
+# kubeconfig_path    = "~/.kube/config"
+kubeconfig_path    = null
 kubeconfig_context = ""
 
 app_configs = {

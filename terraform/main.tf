@@ -19,8 +19,8 @@ locals {
 }
 
 # Configure Kubernetes Provider
-# Note: If config_path is null, provider will use default kubeconfig discovery
-# (KUBECONFIG env var or ~/.kube/config)
+# Note: If kubeconfig_path is null, the provider will use KUBECONFIG env var or default ~/.kube/config
+# If kubeconfig_path is set, Terraform will validate the file exists - ensure it's present!
 provider "kubernetes" {
   config_path    = local.kubeconfig_path_expanded
   config_context = var.kubeconfig_context != "" ? var.kubeconfig_context : null
