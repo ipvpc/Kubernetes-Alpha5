@@ -48,7 +48,7 @@ check_and_install_ansible() {
     # Check if pip is available
     if ! command -v $PIP_CMD &> /dev/null; then
         echo -e "${YELLOW}pip is not installed. Installing pip...${NC}"
-        if [ "$(uname)" == "Darwin" ]; then
+        if [ "$(uname)" = "Darwin" ]; then
             # macOS
             if command -v brew &> /dev/null; then
                 brew install python3
@@ -114,7 +114,7 @@ check_and_install_terraform() {
     esac
     
     # Install Terraform based on OS
-    if [ "$OS" == "Linux" ]; then
+    if [ "$OS" = "Linux" ]; then
         TERRAFORM_VERSION="1.6.0"
         TERRAFORM_URL="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip"
         
@@ -126,7 +126,7 @@ check_and_install_terraform() {
         rm terraform_${TERRAFORM_VERSION}_linux_${TERRAFORM_ARCH}.zip
         cd - > /dev/null
         
-    elif [ "$OS" == "Darwin" ]; then
+    elif [ "$OS" = "Darwin" ]; then
         # macOS - try Homebrew first
         if command -v brew &> /dev/null; then
             echo -e "${YELLOW}Installing Terraform via Homebrew...${NC}"
@@ -223,7 +223,7 @@ FIRST_MASTER=$(ansible-inventory -i ansible/inventory.yml --list | jq -r '.contr
 if [ -n "$FIRST_MASTER" ]; then
     echo -e "${YELLOW}Downloading kubeconfig from $FIRST_MASTER...${NC}"
     
-    if [ "$INSTALL_METHOD" == "k3s" ]; then
+    if [ "$INSTALL_METHOD" = "k3s" ]; then
         ansible $FIRST_MASTER -i ansible/inventory.yml -m fetch \
             -a "src=/root/.kube/config dest=~/.kube/config-$ENVIRONMENT flat=yes" \
             --become
@@ -235,7 +235,7 @@ if [ -n "$FIRST_MASTER" ]; then
     
     # Update kubeconfig context name
     if [ -f ~/.kube/config-$ENVIRONMENT ]; then
-        if [ "$INSTALL_METHOD" == "k3s" ]; then
+        if [ "$INSTALL_METHOD" = "k3s" ]; then
             # Update server URL for k3s
             MASTER_IP=$(ansible-inventory -i ansible/inventory.yml --host $FIRST_MASTER | jq -r '.ansible_host')
             sed -i.bak "s/127\.0\.0\.1:6443/$MASTER_IP:6443/g" ~/.kube/config-$ENVIRONMENT
