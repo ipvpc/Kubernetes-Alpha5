@@ -329,12 +329,16 @@
     - name: Add CRI socket to join command
       set_fact:
         join_command_with_cri: "{{ join_command }} --cri-socket={{ cri_socket }}"
-      when: join_command != "" and join_command is not regex_search('--cri-socket')
+      when: 
+        - join_command != ""
+        - "'--cri-socket' not in join_command"
 
     - name: Use original join command if CRI socket already present
       set_fact:
         join_command_with_cri: "{{ join_command }}"
-      when: join_command != "" and join_command is regex_search('--cri-socket')
+      when: 
+        - join_command != ""
+        - "'--cri-socket' in join_command"
 
     - name: Debug join command
       debug:
