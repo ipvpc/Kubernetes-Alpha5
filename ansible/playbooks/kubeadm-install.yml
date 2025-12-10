@@ -243,6 +243,11 @@
         remote_src: true
         mode: '0644'
 
+    - name: Verify kubeconfig file exists
+      stat:
+        path: /root/.kube/config
+      register: kubeconfig_stat
+
     - name: Wait for API server to be ready
       shell: kubectl --kubeconfig=/root/.kube/config get nodes
       register: wait_result
@@ -250,16 +255,19 @@
       retries: 30
       delay: 5
       changed_when: false
+      when: kubeconfig_stat.stat.exists
 
     - name: Install CNI plugin (Flannel)
-      shell: |
-        kubectl --kubeconfig=/root/.kube/config apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
-      when: cni_plugin == "flannel"
+      shell: kubectl --kubeconfig=/root/.kube/config apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      when: 
+        - cni_plugin == "flannel"
+        - kubeconfig_stat.stat.exists
 
     - name: Install CNI plugin (Calico)
-      shell: |
-        kubectl --kubeconfig=/root/.kube/config apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml
-      when: cni_plugin == "calico"
+      shell: kubectl --kubeconfig=/root/.kube/config apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml
+      when:
+        - cni_plugin == "calico"
+        - kubeconfig_stat.stat.exists
 
 - name: Join additional control plane nodes
   hosts: control_plane[1:]
