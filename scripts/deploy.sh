@@ -9,15 +9,23 @@ set -e
 ENVIRONMENT=${1:-dev}
 ACTION=${2:-plan}
 
-if [[ ! "$ENVIRONMENT" =~ ^(dev|staging|prod|manager)$ ]]; then
-    echo "Error: Environment must be one of: dev, staging, prod, manager"
-    exit 1
-fi
+case "$ENVIRONMENT" in
+    dev|staging|prod|manager)
+        ;;
+    *)
+        echo "Error: Environment must be one of: dev, staging, prod, manager"
+        exit 1
+        ;;
+esac
 
-if [[ ! "$ACTION" =~ ^(init|plan|apply|destroy|validate)$ ]]; then
-    echo "Error: Action must be one of: init, plan, apply, destroy, validate"
-    exit 1
-fi
+case "$ACTION" in
+    init|plan|apply|destroy|validate)
+        ;;
+    *)
+        echo "Error: Action must be one of: init, plan, apply, destroy, validate"
+        exit 1
+        ;;
+esac
 
 echo "=========================================="
 echo "Terraform Kubernetes Deployment"
