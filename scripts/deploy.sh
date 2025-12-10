@@ -6,7 +6,7 @@
 
 set -e
 
-ENVIRONMENT=${1:-dev}
+ENVIRONMENT=${1:-manager}
 ACTION=${2:-plan}
 
 case "$ENVIRONMENT" in
