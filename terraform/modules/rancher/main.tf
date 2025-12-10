@@ -69,6 +69,45 @@ resource "helm_release" "cert_manager" {
   }
 
   depends_on = [kubernetes_namespace.cert_manager]
+  
+  # Wait for cert-manager to be fully deployed
+  wait = true
+  timeout = 600
+}
+
+# Wait for cert-manager CRDs to be available before creating ClusterIssuer
+# This ensures the ClusterIssuer CRD is registered with the API server
+resource "null_resource" "wait_for_cert_manager_crds" {
+  count = var.enable_rancher && var.enable_letsencrypt ? 1 : 0
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      echo "Waiting for cert-manager CRDs to be available..."
+      max_attempts=60
+      attempt=0
+      while [ $attempt -lt $max_attempts ]; do
+        if kubectl get crd clusterissuers.cert-manager.io >/dev/null 2>&1; then
+          echo "✓ cert-manager CRDs are available!"
+          # Give it a few more seconds to ensure CRD is fully registered
+          sleep 5
+          exit 0
+        fi
+        attempt=$((attempt + 1))
+        echo "Attempt $attempt/$max_attempts: CRDs not ready yet, waiting 5 seconds..."
+        sleep 5
+      done
+      echo "ERROR: cert-manager CRDs not available after $max_attempts attempts (5 minutes)"
+      exit 1
+    EOT
+  }
+
+  depends_on = [helm_release.cert_manager]
+  
+  # Trigger re-run if cert-manager is recreated
+  triggers = {
+    cert_manager_release = helm_release.cert_manager[0].id
+  }
 }
 
 # Create ClusterIssuer for Let's Encrypt (if using Let's Encrypt)
@@ -99,7 +138,10 @@ resource "kubernetes_manifest" "letsencrypt_issuer" {
     }
   }
 
-  depends_on = [helm_release.cert_manager]
+  depends_on = [
+    helm_release.cert_manager,
+    null_resource.wait_for_cert_manager_crds
+  ]
 }
 
 # Deploy Rancher using Helm
