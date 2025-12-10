@@ -77,13 +77,14 @@ resource "helm_release" "cert_manager" {
 
 # Wait for cert-manager CRDs to be installed and registered
 # CRDs can take time to be fully registered with the API server after Helm installs them
+# Increased wait time to ensure CRDs are fully registered before Terraform validates the manifest
 resource "time_sleep" "wait_for_cert_manager_crds" {
   count = var.enable_rancher && var.enable_letsencrypt ? 1 : 0
 
   depends_on = [helm_release.cert_manager]
   
-  # Wait 30 seconds for CRDs to be installed and registered
-  create_duration = "30s"
+  # Wait 90 seconds for CRDs to be installed and registered with API server
+  create_duration = "90s"
 }
 
 # Verify cert-manager CRDs are available before creating ClusterIssuer
@@ -132,31 +133,47 @@ resource "null_resource" "verify_cert_manager_crds" {
 }
 
 # Create ClusterIssuer for Let's Encrypt (if using Let's Encrypt)
-resource "kubernetes_manifest" "letsencrypt_issuer" {
+# Using null_resource with kubectl to avoid Terraform validation issues with CRDs
+# This ensures the CRD is available before we try to create the resource
+resource "null_resource" "letsencrypt_issuer" {
   count = var.enable_rancher && var.enable_letsencrypt ? 1 : 0
 
-  manifest = {
-    apiVersion = "cert-manager.io/v1"
-    kind       = "ClusterIssuer"
-    metadata = {
-      name = var.letsencrypt_issuer_name
-    }
-    spec = {
-      acme = {
-        server = var.letsencrypt_server
-        email  = var.letsencrypt_email
-        privateKeySecretRef = {
-          name = "letsencrypt-private-key"
-        }
-        solvers = [{
-          http01 = {
-            ingress = {
-              class = var.ingress_class
-            }
-          }
-        }]
-      }
-    }
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      echo "Creating Let's Encrypt ClusterIssuer..."
+      
+      # Create ClusterIssuer YAML
+      cat <<EOF | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ${var.letsencrypt_issuer_name}
+spec:
+  acme:
+    server: ${var.letsencrypt_server}
+    email: ${var.letsencrypt_email}
+    privateKeySecretRef:
+      name: letsencrypt-private-key
+    solvers:
+    - http01:
+        ingress:
+          class: ${var.ingress_class}
+EOF
+      
+      echo "✓ ClusterIssuer '${var.letsencrypt_issuer_name}' created successfully"
+    EOT
+  }
+
+  # Destroy: remove the ClusterIssuer when resource is destroyed
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      set -e
+      echo "Removing Let's Encrypt ClusterIssuer..."
+      kubectl delete clusterissuer ${self.triggers.letsencrypt_issuer_name} --ignore-not-found=true || true
+      echo "✓ ClusterIssuer removed"
+    EOT
   }
 
   depends_on = [
@@ -164,6 +181,15 @@ resource "kubernetes_manifest" "letsencrypt_issuer" {
     time_sleep.wait_for_cert_manager_crds,
     null_resource.verify_cert_manager_crds
   ]
+  
+  # Trigger re-creation if any of these change
+  triggers = {
+    cert_manager_release = helm_release.cert_manager[0].id
+    letsencrypt_issuer_name = var.letsencrypt_issuer_name
+    letsencrypt_server = var.letsencrypt_server
+    letsencrypt_email = var.letsencrypt_email
+    ingress_class = var.ingress_class
+  }
 }
 
 # Deploy Rancher using Helm
