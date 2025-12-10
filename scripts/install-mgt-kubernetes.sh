@@ -245,7 +245,35 @@ if [ -n "$FIRST_MASTER" ]; then
         kubectl config --kubeconfig=~/.kube/config-$ENVIRONMENT rename-context default $ENVIRONMENT 2>/dev/null || true
         
         echo -e "${GREEN}Kubeconfig saved to ~/.kube/config-$ENVIRONMENT${NC}"
-        echo -e "${YELLOW}To use this cluster, run:${NC}"
+        
+        # Export KUBECONFIG for current session
+        export KUBECONFIG=~/.kube/config-$ENVIRONMENT
+        echo -e "${GREEN}KUBECONFIG exported for current session${NC}"
+        
+        # Add to shell profile if not already present
+        SHELL_PROFILE=""
+        if [ -f ~/.bashrc ]; then
+            SHELL_PROFILE=~/.bashrc
+        elif [ -f ~/.bash_profile ]; then
+            SHELL_PROFILE=~/.bash_profile
+        elif [ -f ~/.zshrc ]; then
+            SHELL_PROFILE=~/.zshrc
+        fi
+        
+        if [ -n "$SHELL_PROFILE" ]; then
+            EXPORT_LINE="export KUBECONFIG=~/.kube/config-$ENVIRONMENT"
+            if ! grep -q "KUBECONFIG=~/.kube/config-$ENVIRONMENT" "$SHELL_PROFILE" 2>/dev/null; then
+                echo "" >> "$SHELL_PROFILE"
+                echo "# Kubernetes kubeconfig for $ENVIRONMENT" >> "$SHELL_PROFILE"
+                echo "$EXPORT_LINE" >> "$SHELL_PROFILE"
+                echo -e "${GREEN}Added KUBECONFIG export to $SHELL_PROFILE${NC}"
+                echo -e "${YELLOW}Run 'source $SHELL_PROFILE' or open a new terminal to use it${NC}"
+            else
+                echo -e "${YELLOW}KUBECONFIG export already exists in $SHELL_PROFILE${NC}"
+            fi
+        fi
+        
+        echo -e "${YELLOW}To use this cluster in current session:${NC}"
         echo "  export KUBECONFIG=~/.kube/config-$ENVIRONMENT"
         echo "  kubectl get nodes"
     fi
