@@ -3,7 +3,7 @@
 
 environment = "manager"
 
-kubeconfig_path    = "~/.kube/config"
+kubeconfig_path    = "~/.kube/config-manager"
 kubeconfig_context = ""
 
 # Enable Rancher for management cluster
