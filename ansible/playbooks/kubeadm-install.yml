@@ -222,13 +222,26 @@
       register: kubeadm_init
       changed_when: true
 
+    - name: Debug kubeadm init output
+      debug:
+        msg: "{{ kubeadm_init.stdout_lines }}"
+      when: kubeadm_init.stdout_lines is defined
+
+    - name: Extract all kubeadm join commands
+      set_fact:
+        all_join_commands: "{{ kubeadm_init.stdout_lines | select('match', 'kubeadm join') | list }}"
+
+    - name: Debug join commands
+      debug:
+        msg: "Found join commands: {{ all_join_commands }}"
+
     - name: Save kubeadm join command for control plane
       set_fact:
-        kubeadm_join_command: "{{ kubeadm_init.stdout_lines | select('match', 'kubeadm join') | list | first }}"
+        kubeadm_join_command: "{{ all_join_commands[0] | default('') }}"
 
     - name: Save kubeadm join command for workers
       set_fact:
-        kubeadm_join_command_worker: "{{ kubeadm_init.stdout_lines | select('match', 'kubeadm join') | list | last }}"
+        kubeadm_join_command_worker: "{{ all_join_commands[-1] | default(all_join_commands[0] | default('')) }}"
 
     - name: Create .kube directory
       file:
@@ -285,6 +298,37 @@
   gather_facts: false
   
   tasks:
+    - name: Set CRI socket path
+      set_fact:
+        cri_socket: "{% if container_runtime == 'containerd' %}unix:///var/run/containerd/containerd.sock{% elif container_runtime == 'crio' %}unix:///var/run/crio/crio.sock{% else %}unix:///var/run/containerd/containerd.sock{% endif %}"
+
+    - name: Reset worker node if previously joined
+      shell: kubeadm reset --force --cri-socket={{ cri_socket }}
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Get join command from master
+      set_fact:
+        join_command: "{{ hostvars[groups['control_plane'][0]]['kubeadm_join_command_worker'] | default('') }}"
+
+    - name: Debug join command
+      debug:
+        msg: "Join command for {{ inventory_hostname }}: {{ join_command }}"
+      when: join_command != ""
+
+    - name: Fail if join command is empty
+      fail:
+        msg: "Join command is empty. Check if kubeadm init completed successfully on master node."
+      when: join_command == ""
+
     - name: Join worker node
-      shell: "{{ hostvars[groups['control_plane'][0]]['kubeadm_join_command_worker'] }}"
-      when: kubeadm_join_command_worker is defined
+      shell: "{{ join_command }}"
+      when: join_command != ""
+      register: join_result
+
+    - name: Display join result
+      debug:
+        msg: "{{ join_result.stdout_lines }}"
+      when: 
+        - join_result is defined
+        - join_result.stdout_lines is defined
