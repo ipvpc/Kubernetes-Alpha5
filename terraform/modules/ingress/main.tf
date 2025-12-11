@@ -31,8 +31,10 @@ resource "helm_release" "traefik" {
       # Ports configuration
       ports = {
         web = {
-          port       = 80
-          redirectTo = "websecure"
+          port = 80
+          redirectTo = {
+            port = "websecure"
+          }
         }
         websecure = {
           port = 443
