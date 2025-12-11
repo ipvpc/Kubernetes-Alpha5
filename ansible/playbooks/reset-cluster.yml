@@ -1,0 +1,125 @@
+---
+# Reset Kubernetes Cluster
+# This playbook completely resets a Kubernetes cluster
+# Usage: ansible-playbook playbooks/reset-cluster.yml -i inventory-devops.yml
+
+- name: Reset Kubernetes Cluster
+  hosts: all
+  become: true
+  gather_facts: false
+  
+  vars:
+    cri_socket: "unix:///var/run/containerd/containerd.sock"
+  
+  tasks:
+    - name: Display warning
+      debug:
+        msg: |
+          ==========================================
+          WARNING: This will completely reset the cluster!
+          ==========================================
+          This will:
+          - Remove all Kubernetes components
+          - Delete all pods and services
+          - Remove CNI plugins (Flannel/Calico)
+          - Clean up all Kubernetes data
+          ==========================================
+
+    - name: Check if kubeconfig exists
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_exists
+      when: inventory_hostname == groups['control_plane'][0]
+
+    - name: Remove CNI plugins (Flannel)
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml --ignore-not-found=true || true
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete namespace kube-flannel --ignore-not-found=true || true
+      when: 
+        - inventory_hostname == groups['control_plane'][0]
+        - admin_conf_exists.stat.exists
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Remove CNI plugins (Calico)
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml --ignore-not-found=true || true
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete namespace calico-system --ignore-not-found=true || true
+      when: 
+        - inventory_hostname == groups['control_plane'][0]
+        - admin_conf_exists.stat.exists
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Reset kubeadm on all nodes
+      shell: |
+        kubeadm reset --force --cri-socket={{ cri_socket }} || true
+      register: reset_result
+      changed_when: reset_result.rc == 0
+      ignore_errors: yes
+
+    - name: Clean up Kubernetes directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/kubernetes
+        - /var/lib/kubelet
+        - /var/lib/etcd
+        - /etc/cni/net.d
+        - /opt/cni/bin
+        - /root/.kube
+      ignore_errors: yes
+
+    - name: Clean up iptables rules
+      shell: |
+        iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X || true
+        ip6tables -F && ip6tables -t nat -F && ip6tables -t mangle -F && ip6tables -X || true
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Remove CNI interfaces
+      shell: |
+        ip link delete cni0 2>/dev/null || true
+        ip link delete flannel.1 2>/dev/null || true
+        ip link delete docker0 2>/dev/null || true
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Clean up containerd
+      shell: |
+        crictl rm -a -f || true
+        crictl rmi -a || true
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Restart containerd
+      systemd:
+        name: containerd
+        state: restarted
+      ignore_errors: yes
+
+    - name: Restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
+      ignore_errors: yes
+
+    - name: Display reset completion
+      debug:
+        msg: |
+          ==========================================
+          Cluster Reset Complete!
+          ==========================================
+          All Kubernetes components have been removed.
+          
+          Next steps:
+          1. Re-run the installation:
+             ./scripts/install-devops-kubernetes.sh devops kubeadm
+          
+          2. Or use Ansible directly:
+             ansible-playbook playbooks/devops-cluster.yml -i inventory-devops.yml
+          
+          The cluster will be installed with Calico and network isolation.
+          ==========================================
+

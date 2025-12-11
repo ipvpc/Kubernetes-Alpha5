@@ -36,32 +36,121 @@
   
   vars:
     cluster_name: "devops"
+    setup_network_isolation: true
   
   tasks:
+    - name: Set kubeconfig path
+      set_fact:
+        kubeconfig: "{{ '/etc/kubernetes/admin.conf' if (stat('/etc/kubernetes/admin.conf') | default({'stat': {'exists': False}})).stat.exists else '/root/.kube/config' }}"
+
+    - name: Check if kubeconfig exists
+      stat:
+        path: "{{ kubeconfig }}"
+      register: kubeconfig_check
+
     - name: Set cluster context name
       shell: |
-        kubectl config --kubeconfig=/root/.kube/config rename-context default {{ cluster_name }} 2>/dev/null || \
-        kubectl config --kubeconfig=/root/.kube/config set-context {{ cluster_name }} --cluster=kubernetes --user=kubernetes-admin 2>/dev/null || true
+        kubectl config --kubeconfig={{ kubeconfig }} rename-context default {{ cluster_name }} 2>/dev/null || \
+        kubectl config --kubeconfig={{ kubeconfig }} set-context {{ cluster_name }} --cluster=kubernetes --user=kubernetes-admin 2>/dev/null || true
       changed_when: false
       ignore_errors: yes
-    
+      when: kubeconfig_check.stat.exists
+
     - name: Verify cluster is ready
-      shell: kubectl --kubeconfig=/root/.kube/config get nodes -o wide
+      shell: kubectl --kubeconfig={{ kubeconfig }} get nodes -o wide
       register: cluster_status
       changed_when: false
       ignore_errors: yes
-    
+      when: kubeconfig_check.stat.exists
+
     - name: Display cluster status
       debug:
         msg: "{{ cluster_status.stdout_lines | default(['Cluster status check failed']) }}"
       when: cluster_status is defined
-    
+
+    - name: Wait for Calico to be ready before setting up network isolation
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig }} wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s
+      register: calico_wait
+      retries: 10
+      delay: 10
+      until: calico_wait.rc == 0
+      changed_when: false
+      ignore_errors: yes
+      when: 
+        - kubeconfig_check.stat.exists
+        - cni_plugin | default('calico') == "calico"
+        - setup_network_isolation | bool
+
+    - name: Setup network isolation (default deny-all)
+      shell: |
+        cat <<EOF | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: default-deny-all
+          namespace: default
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+          - Egress
+        EOF
+      register: default_policy
+      changed_when: default_policy.rc == 0
+      when: 
+        - kubeconfig_check.stat.exists
+        - setup_network_isolation | bool
+        - calico_wait.rc == 0 | default(false)
+
+    - name: Setup allow DNS network policy
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig }} label namespace kube-system name=kube-system --overwrite || true
+        cat <<EOF | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-dns
+          namespace: default
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Egress
+          egress:
+          - to:
+            - namespaceSelector:
+                matchLabels:
+                  name: kube-system
+            ports:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53
+        EOF
+      register: dns_policy
+      changed_when: dns_policy.rc == 0
+      when: 
+        - kubeconfig_check.stat.exists
+        - setup_network_isolation | bool
+        - calico_wait.rc == 0 | default(false)
+
+    - name: Display network policies created
+      shell: kubectl --kubeconfig={{ kubeconfig }} get networkpolicies -A
+      register: np_status
+      changed_when: false
+      failed_when: false
+      when: 
+        - kubeconfig_check.stat.exists
+        - setup_network_isolation | bool
+
     - name: Display cluster information
       debug:
         msg: |
           ==========================================
           DevOps Kubernetes Cluster Created!
           Cluster Name: {{ cluster_name }}
+          CNI Plugin: {{ cni_plugin | default('calico') }}
+          Network Isolation: {{ 'Enabled' if setup_network_isolation else 'Disabled' }}
           ==========================================
           To access the cluster:
           1. Copy kubeconfig from master node:
@@ -70,5 +159,14 @@
              export KUBECONFIG=~/.kube/config-{{ cluster_name }}
           3. Verify cluster:
              kubectl get nodes
+          {% if setup_network_isolation %}
+          
+          Network Isolation:
+          - Default deny-all policy is active
+          - DNS is allowed
+          - Pods are isolated by default
+          - To expose services, use NodePort/LoadBalancer/Ingress
+          - See: ansible/NETWORK_ISOLATION_GUIDE.md
+          {% endif %}
           ==========================================
 

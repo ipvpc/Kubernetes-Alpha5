@@ -11,6 +11,26 @@ This guide explains how to create a Kubernetes cluster named "devops" using Ansi
 
 ## Quick Start
 
+### Reset Existing Cluster (if needed)
+
+If you have an existing cluster with Flannel and want to start fresh with Calico:
+
+```bash
+# From the project root directory
+./scripts/reset-and-install-devops.sh
+```
+
+Or manually:
+```bash
+# Step 1: Reset cluster
+cd ansible
+ansible-playbook playbooks/reset-cluster.yml -i inventory-devops.yml
+cd ..
+
+# Step 2: Reinstall
+./scripts/install-devops-kubernetes.sh devops kubeadm
+```
+
 ### Option 1: Using the Installation Script (Recommended)
 
 ```bash
@@ -22,6 +42,10 @@ Or for k3s:
 ```bash
 ./scripts/install-devops-kubernetes.sh devops k3s
 ```
+
+**Note:** The cluster will be installed with:
+- **CNI Plugin**: Calico (configured in inventory-devops.yml)
+- **Network Isolation**: Enabled by default (default deny-all policy)
 
 ### Option 2: Using Ansible Playbook Directly
 
@@ -85,11 +109,18 @@ all:
    - Joins worker nodes
 
 4. **CNI Plugin Installation**:
-   - Installs Flannel or Calico network plugin
+   - Installs Calico network plugin (configured in inventory)
+   - Waits for Calico pods to be ready
 
-5. **Post-installation**:
+5. **Network Isolation Setup**:
+   - Creates default deny-all network policy (isolates all pods)
+   - Allows DNS resolution
+   - Allows kube-system communication
+
+6. **Post-installation**:
    - Configures kubeconfig
    - Verifies cluster status
+   - Sets cluster context name
 
 ## Accessing the Cluster
 
