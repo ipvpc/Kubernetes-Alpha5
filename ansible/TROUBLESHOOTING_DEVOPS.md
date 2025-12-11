@@ -137,6 +137,64 @@ sudo rm -rf /etc/kubernetes /var/lib/etcd /etc/cni/net.d
 # Then re-run playbook
 ```
 
+## Common Error: "connection to the server was refused"
+
+This error occurs when kubectl cannot connect to the Kubernetes API server, usually because:
+
+1. **API server not ready** - The API server pod hasn't started yet
+2. **Wrong kubeconfig endpoint** - kubeconfig pointing to wrong IP/port
+3. **API server only listening on localhost** - Not bound to external IP
+
+### Quick Fix
+
+```bash
+# SSH into master node
+ssh support@192.168.10.73
+
+# Use admin.conf directly (always works on master)
+kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes
+
+# If that works, copy it to the expected location
+sudo cp /etc/kubernetes/admin.conf /root/.kube/config
+
+# Check API server pod status
+kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l component=kube-apiserver
+
+# Wait for API server to be ready
+kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=ready pod -l component=kube-apiserver -n kube-system --timeout=300s
+
+# Verify connectivity
+kubectl --kubeconfig=/etc/kubernetes/admin.conf cluster-info
+```
+
+### Check API Server Status
+
+```bash
+# Check if API server pod is running
+kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l component=kube-apiserver
+
+# Check API server logs
+kubectl --kubeconfig=/etc/kubernetes/admin.conf logs -n kube-system -l component=kube-apiserver --tail=50
+
+# Check if port 6443 is listening
+sudo netstat -tlnp | grep 6443
+# or
+sudo ss -tlnp | grep 6443
+```
+
+### Fix kubeconfig Server Endpoint
+
+If kubeconfig points to wrong address:
+
+```bash
+# Check current server endpoint
+grep server /root/.kube/config
+
+# Update to correct IP (replace with your master IP)
+sudo sed -i 's|server: https://127.0.0.1:6443|server: https://192.168.10.73:6443|' /root/.kube/config
+sudo sed -i 's|server: https://localhost:6443|server: https://192.168.10.73:6443|' /root/.kube/config
+```
+
 ## Common Error: kube-proxy CrashLoopBackOff
 
 This error occurs when kube-proxy cannot start, usually because:
