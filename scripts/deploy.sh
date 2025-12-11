@@ -173,17 +173,19 @@ check_and_install_helm() {
 cleanup_stuck_namespaces() {
     echo "Checking for stuck namespaces..."
     
-    # Check for stuck ingress-nginx namespace
-    if kubectl get namespace ingress-nginx >/dev/null 2>&1; then
-        NS_STATUS=$(kubectl get namespace ingress-nginx -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
-        if [ "$NS_STATUS" = "Terminating" ]; then
-            echo "⚠ Found stuck namespace 'ingress-nginx' in Terminating state"
-            echo "Attempting to clean up..."
-            kubectl patch namespace ingress-nginx -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
-            kubectl delete namespace ingress-nginx --force --grace-period=0 --timeout=30s 2>/dev/null || true
-            sleep 3
+    # Check for stuck ingress namespaces (both nginx and traefik)
+    for namespace in ingress-nginx traefik; do
+        if kubectl get namespace "$namespace" >/dev/null 2>&1; then
+            NS_STATUS=$(kubectl get namespace "$namespace" -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+            if [ "$NS_STATUS" = "Terminating" ]; then
+                echo "⚠ Found stuck namespace '$namespace' in Terminating state"
+                echo "Attempting to clean up..."
+                kubectl patch namespace "$namespace" -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+                kubectl delete namespace "$namespace" --force --grace-period=0 --timeout=30s 2>/dev/null || true
+                sleep 3
+            fi
         fi
-    fi
+    done
 }
 
 # Check dependencies

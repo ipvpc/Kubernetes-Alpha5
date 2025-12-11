@@ -287,15 +287,15 @@ resource "kubernetes_ingress_v1" "rancher" {
     name      = "rancher-external-ingress"
     namespace = kubernetes_namespace.rancher.metadata[0].name
     annotations = {
-      "kubernetes.io/ingress.class"                = var.ingress_class
       "cert-manager.io/cluster-issuer"             = var.letsencrypt_issuer_name
-      "nginx.ingress.kubernetes.io/ssl-redirect"   = "true"
-      "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
+      "traefik.ingress.kubernetes.io/router.entrypoints" = "web,websecure"
+      "traefik.ingress.kubernetes.io/router.tls"  = "true"
     }
   }
 
-  spec {
-    ingress_class_name = var.ingress_class
+    spec {
+      ingress_class_name = var.ingress_class
+      # Traefik uses IngressRoute CRD, but we'll use standard Ingress for compatibility
 
     rule {
       host = var.rancher_hostname

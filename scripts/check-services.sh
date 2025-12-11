@@ -12,9 +12,9 @@ echo "1. Cluster Nodes:"
 kubectl get nodes
 
 echo ""
-echo "2. Ingress Controller:"
-kubectl get pods -n ingress-nginx
-kubectl get service -n ingress-nginx
+echo "2. Ingress Controller (Traefik):"
+kubectl get pods -n traefik
+kubectl get service -n traefik
 
 echo ""
 echo "3. cert-manager:"
@@ -34,8 +34,8 @@ kubectl get ingress -n cattle-system 2>/dev/null || echo "   No Ingress found"
 echo ""
 echo "5. Access Information:"
 echo "   Ingress Controller IP:"
-kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}{"\n"}' 2>/dev/null || \
-kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{"\n"}' 2>/dev/null || \
+kubectl get service traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}{"\n"}' 2>/dev/null || \
+kubectl get service traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{"\n"}' 2>/dev/null || \
 echo "   (Pending or using NodePort)"
 
 echo ""

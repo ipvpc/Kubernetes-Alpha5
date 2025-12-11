@@ -6,19 +6,19 @@ variable "environment" {
 variable "namespace" {
   description = "Kubernetes namespace for ingress"
   type        = string
-  default     = "ingress-nginx"
+  default     = "traefik"
 }
 
 variable "enable_ingress_controller" {
-  description = "Enable NGINX Ingress Controller"
+  description = "Enable Traefik Ingress Controller"
   type        = bool
   default     = true
 }
 
 variable "ingress_chart_version" {
-  description = "NGINX Ingress chart version"
+  description = "Traefik chart version"
   type        = string
-  default     = "4.8.3"
+  default     = "27.0.0"
 }
 
 variable "ingress_replicas" {

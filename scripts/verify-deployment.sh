@@ -104,17 +104,23 @@ fi
 
 # Check Ingress Controller
 echo ""
-echo "2. Checking Ingress Controller..."
-if check_namespace "ingress-nginx"; then
-    check_pods "ingress-nginx" "app.kubernetes.io/name=ingress-nginx"
-    check_service "ingress-nginx" "ingress-nginx-controller"
+echo "2. Checking Ingress Controller (Traefik)..."
+if check_namespace "traefik"; then
+    check_pods "traefik" "app.kubernetes.io/name=traefik"
+    check_service "traefik" "traefik"
     
     # Get ingress controller external IP
     echo ""
-    echo "   Ingress Controller External IP:"
-    kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].ip}{"\n"}' || \
-    kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{"\n"}' || \
+    echo "   Traefik External IP:"
+    kubectl get service traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}{"\n"}' || \
+    kubectl get service traefik -n traefik -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{"\n"}' || \
     echo "   (No external IP assigned yet - may be pending)"
+    
+    # Check Traefik dashboard
+    echo ""
+    echo "   Traefik Dashboard:"
+    echo "   - Access via: kubectl port-forward -n traefik svc/traefik-dashboard 9000:9000"
+    echo "   - Then open: http://localhost:9000/dashboard/"
 fi
 
 # Check cert-manager

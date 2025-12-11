@@ -121,15 +121,14 @@ resource "kubernetes_ingress_v1" "apps" {
     namespace = var.namespace
     labels    = merge(local.default_labels, { app = each.key })
     annotations = {
-      "kubernetes.io/ingress.class"                = "nginx"
       "cert-manager.io/cluster-issuer"             = "letsencrypt-prod"
-      "nginx.ingress.kubernetes.io/ssl-redirect"   = "true"
-      "nginx.ingress.kubernetes.io/force-ssl-redirect" = "true"
+      "traefik.ingress.kubernetes.io/router.entrypoints" = "web,websecure"
+      "traefik.ingress.kubernetes.io/router.tls"   = "true"
     }
   }
 
   spec {
-    ingress_class_name = "nginx"
+    ingress_class_name = "traefik"
 
     rule {
       host = each.value.ingress_host

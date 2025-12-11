@@ -50,7 +50,7 @@ variable "common_labels" {
 }
 
 variable "enable_ingress_controller" {
-  description = "Enable NGINX Ingress Controller deployment"
+  description = "Enable Traefik Ingress Controller deployment"
   type        = bool
   default     = false
 }
@@ -125,7 +125,7 @@ variable "rancher_tls_source" {
 variable "rancher_ingress_class" {
   description = "Ingress class for Rancher"
   type        = string
-  default     = "nginx"
+  default     = "traefik"
 }
 
 variable "enable_letsencrypt" {

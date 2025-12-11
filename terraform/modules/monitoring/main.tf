@@ -36,7 +36,7 @@ resource "helm_release" "prometheus" {
           enabled     = var.enable_grafana_ingress
           hosts       = [var.grafana_ingress_host]
           annotations = {
-            "kubernetes.io/ingress.class" = "nginx"
+            "traefik.ingress.kubernetes.io/router.entrypoints" = "web,websecure"
           }
         }
       }

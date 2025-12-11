@@ -1,38 +1,53 @@
 # Ingress Controller Module
-# Deploys NGINX Ingress Controller
+# Deploys Traefik Ingress Controller
 
-resource "helm_release" "nginx_ingress" {
+resource "helm_release" "traefik" {
   count = var.enable_ingress_controller ? 1 : 0
 
-  name       = "nginx-ingress"
-  repository = "https://kubernetes.github.io/ingress-nginx"
-  chart      = "ingress-nginx"
+  name       = "traefik"
+  repository = "https://traefik.github.io/charts"
+  chart      = "traefik"
   version    = var.ingress_chart_version
   namespace  = var.namespace
 
   values = [
     yamlencode({
-      controller = {
-        replicaCount = var.ingress_replicas
-        resources = {
-          requests = {
-            cpu    = var.ingress_cpu_request
-            memory = var.ingress_memory_request
-          }
-          limits = {
-            cpu    = var.ingress_cpu_limit
-            memory = var.ingress_memory_limit
-          }
+      replicas = var.ingress_replicas
+      resources = {
+        requests = {
+          cpu    = var.ingress_cpu_request
+          memory = var.ingress_memory_request
         }
-        service = {
-          type = var.ingress_service_type
-        }
-        # Disable admission webhook to avoid certificate issues during deployment
-        # The webhook can cause issues if certificates aren't ready yet
-        admissionWebhooks = {
-          enabled = false
+        limits = {
+          cpu    = var.ingress_cpu_limit
+          memory = var.ingress_memory_limit
         }
       }
+      service = {
+        type = var.ingress_service_type
+      }
+      # Enable Traefik dashboard
+      dashboard = {
+        enabled = true
+        ingressRoute = true
+      }
+      # Enable metrics
+      metrics = {
+        prometheus = {
+          enabled = true
+        }
+      }
+      # Global arguments
+      globalArguments = []
+      # Additional arguments
+      additionalArguments = [
+        "--log.level=INFO",
+        "--accesslog=true",
+        "--entrypoints.web.address=:80",
+        "--entrypoints.websecure.address=:443",
+        "--providers.kubernetesingress=true",
+        "--providers.kubernetescrd=true"
+      ]
     })
   ]
   

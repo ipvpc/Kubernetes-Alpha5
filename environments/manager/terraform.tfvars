@@ -16,7 +16,7 @@ rancher_replicas         = 3                       # HA setup with 3 replicas
 rancher_tls_source       = "rancher"               # Options: rancher (self-signed), letsEncrypt, secret
                                                     # Use "rancher" for HTTP access or quick setup
                                                     # Use "letsEncrypt" for production HTTPS
-rancher_ingress_class     = "nginx"
+rancher_ingress_class     = "traefik"
 
 # Let's Encrypt Configuration
 # Set to false if you want to use HTTP only or self-signed certs (faster setup)

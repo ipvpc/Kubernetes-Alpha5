@@ -57,7 +57,7 @@ variable "rancher_tls_source" {
 variable "ingress_class" {
   description = "Ingress class name"
   type        = string
-  default     = "nginx"
+  default     = "traefik"
 }
 
 variable "enable_letsencrypt" {
