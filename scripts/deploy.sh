@@ -169,10 +169,32 @@ check_and_install_helm() {
     fi
 }
 
+# Function to cleanup stuck namespaces
+cleanup_stuck_namespaces() {
+    echo "Checking for stuck namespaces..."
+    
+    # Check for stuck ingress-nginx namespace
+    if kubectl get namespace ingress-nginx >/dev/null 2>&1; then
+        NS_STATUS=$(kubectl get namespace ingress-nginx -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+        if [ "$NS_STATUS" = "Terminating" ]; then
+            echo "⚠ Found stuck namespace 'ingress-nginx' in Terminating state"
+            echo "Attempting to clean up..."
+            kubectl patch namespace ingress-nginx -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+            kubectl delete namespace ingress-nginx --force --grace-period=0 --timeout=30s 2>/dev/null || true
+            sleep 3
+        fi
+    fi
+}
+
 # Check dependencies
 echo "Checking dependencies..."
 check_and_install_terraform
 check_and_install_helm
+
+# Cleanup stuck namespaces before proceeding
+if command -v kubectl &> /dev/null; then
+    cleanup_stuck_namespaces
+fi
 
 cd terraform
 
