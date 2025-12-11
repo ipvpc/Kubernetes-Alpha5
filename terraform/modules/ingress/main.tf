@@ -26,6 +26,25 @@ resource "helm_release" "traefik" {
       service = {
         type = var.ingress_service_type
       }
+      # Deployment configuration with security context for privileged ports
+      deployment = {
+        podSecurityContext = {
+          fsGroup = 0
+        }
+        securityContext = {
+          capabilities = {
+            drop = ["ALL"]
+            add  = ["NET_BIND_SERVICE"]
+          }
+          readOnlyRootFilesystem = false
+          runAsGroup             = 0
+          runAsNonRoot           = false
+          runAsUser              = 0
+        }
+      }
+      # Alternative: Use hostNetwork if security context doesn't work
+      # This allows binding to privileged ports but reduces network isolation
+      # hostNetwork = false  # Set to true if securityContext approach fails
       # Enable Traefik dashboard
       dashboard = {
         enabled = true
