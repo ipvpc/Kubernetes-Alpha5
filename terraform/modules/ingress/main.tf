@@ -12,15 +12,15 @@ resource "helm_release" "traefik" {
 
   values = [
     yamlencode({
-      replicas = var.ingress_replicas
+      replicas = var.ingress_replicas != null ? var.ingress_replicas : 2
       resources = {
         requests = {
-          cpu    = var.ingress_cpu_request
-          memory = var.ingress_memory_request
+          cpu    = var.ingress_cpu_request != null ? var.ingress_cpu_request : "100m"
+          memory = var.ingress_memory_request != null ? var.ingress_memory_request : "128Mi"
         }
         limits = {
-          cpu    = var.ingress_cpu_limit
-          memory = var.ingress_memory_limit
+          cpu    = var.ingress_cpu_limit != null ? var.ingress_cpu_limit : "500m"
+          memory = var.ingress_memory_limit != null ? var.ingress_memory_limit : "512Mi"
         }
       }
       service = {

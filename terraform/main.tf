@@ -53,6 +53,11 @@ module "ingress" {
 
   environment            = var.environment
   ingress_external_ips   = var.ingress_external_ips
+  ingress_replicas       = var.ingress_replicas
+  ingress_cpu_request    = var.ingress_cpu_request
+  ingress_memory_request = var.ingress_memory_request
+  ingress_cpu_limit      = var.ingress_cpu_limit
+  ingress_memory_limit   = var.ingress_memory_limit
 }
 
 # Deploy Monitoring Stack (optional)

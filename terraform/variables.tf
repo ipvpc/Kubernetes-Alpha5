@@ -61,6 +61,36 @@ variable "ingress_external_ips" {
   default     = []
 }
 
+variable "ingress_replicas" {
+  description = "Number of Traefik ingress controller replicas (reduce to 1 for lower resource usage)"
+  type        = number
+  default     = null
+}
+
+variable "ingress_cpu_request" {
+  description = "Traefik CPU request (reduce for lower resource usage)"
+  type        = string
+  default     = null
+}
+
+variable "ingress_memory_request" {
+  description = "Traefik memory request (reduce for lower resource usage)"
+  type        = string
+  default     = null
+}
+
+variable "ingress_cpu_limit" {
+  description = "Traefik CPU limit (reduce for lower resource usage)"
+  type        = string
+  default     = null
+}
+
+variable "ingress_memory_limit" {
+  description = "Traefik memory limit (reduce for lower resource usage)"
+  type        = string
+  default     = null
+}
+
 variable "enable_monitoring" {
   description = "Enable monitoring stack (Prometheus/Grafana)"
   type        = bool

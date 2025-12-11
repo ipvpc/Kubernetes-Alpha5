@@ -25,30 +25,35 @@ variable "ingress_replicas" {
   description = "Number of ingress controller replicas"
   type        = number
   default     = 2
+  nullable    = true
 }
 
 variable "ingress_cpu_request" {
   description = "Ingress controller CPU request"
   type        = string
   default     = "100m"
+  nullable    = true
 }
 
 variable "ingress_memory_request" {
   description = "Ingress controller memory request"
   type        = string
   default     = "128Mi"
+  nullable    = true
 }
 
 variable "ingress_cpu_limit" {
   description = "Ingress controller CPU limit"
   type        = string
   default     = "500m"
+  nullable    = true
 }
 
 variable "ingress_memory_limit" {
   description = "Ingress controller memory limit"
   type        = string
   default     = "512Mi"
+  nullable    = true
 }
 
 variable "ingress_service_type" {
