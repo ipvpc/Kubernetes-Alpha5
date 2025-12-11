@@ -1,0 +1,239 @@
+---
+# Fix API Server Connection Issues
+# This playbook diagnoses and fixes API server connectivity problems
+# Usage: ansible-playbook playbooks/fix-api-server-connection.yml -i inventory-devops.yml
+
+- name: Fix API Server Connection Issues
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Check if admin.conf exists
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_exists
+
+    - name: Get master node IP
+      set_fact:
+        master_ip: "{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}"
+
+    - name: Check if API server is listening
+      shell: |
+        netstat -tlnp 2>/dev/null | grep ':6443' || ss -tlnp 2>/dev/null | grep ':6443' || echo "NOT_LISTENING"
+      register: api_listening
+      changed_when: false
+      failed_when: false
+
+    - name: Display API server listening status
+      debug:
+        msg: "API server listening status: {{ api_listening.stdout }}"
+
+    - name: Check API server static pod manifest
+      shell: cat /etc/kubernetes/manifests/kube-apiserver.yaml 2>/dev/null | grep -E '--bind-address|--advertise-address' || echo "MANIFEST_NOT_FOUND"
+      register: api_manifest
+      changed_when: false
+      failed_when: false
+
+    - name: Display API server manifest bind address
+      debug:
+        msg: "{{ api_manifest.stdout_lines }}"
+
+    - name: Check API server pod status
+      shell: kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l component=kube-apiserver -o wide 2>/dev/null || echo "CANNOT_QUERY"
+      register: api_pod_status
+      changed_when: false
+      failed_when: false
+      when: admin_conf_exists.stat.exists
+
+    - name: Display API server pod status
+      debug:
+        msg: "{{ api_pod_status.stdout_lines }}"
+      when: api_pod_status is defined
+
+    - name: Check API server logs
+      shell: kubectl --kubeconfig=/etc/kubernetes/admin.conf logs -n kube-system -l component=kube-apiserver --tail=30 2>&1 || journalctl -u kubelet --no-pager | grep -i "apiserver" | tail -20 || echo "CANNOT_GET_LOGS"
+      register: api_logs
+      changed_when: false
+      failed_when: false
+      when: admin_conf_exists.stat.exists
+
+    - name: Display API server logs
+      debug:
+        msg: "{{ api_logs.stdout_lines }}"
+      when: api_logs is defined
+
+    - name: Check kubelet status
+      shell: systemctl status kubelet --no-pager | head -30
+      register: kubelet_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display kubelet status
+      debug:
+        msg: "{{ kubelet_status.stdout_lines }}"
+
+    - name: Check kubelet configuration
+      shell: |
+        echo "=== Kubelet Config ==="
+        cat /var/lib/kubelet/config.yaml 2>/dev/null | grep -E 'apiServers|server' || echo "Config not found"
+        echo ""
+        echo "=== Kubelet Environment ==="
+        cat /var/lib/kubelet/kubeadm-flags.env 2>/dev/null || echo "Flags not found"
+      register: kubelet_config
+      changed_when: false
+      failed_when: false
+
+    - name: Display kubelet configuration
+      debug:
+        msg: "{{ kubelet_config.stdout_lines }}"
+
+    - name: Check if API server is binding to correct address
+      shell: |
+        if [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
+          if grep -q "0.0.0.0" /etc/kubernetes/manifests/kube-apiserver.yaml || grep -q "{{ master_ip }}" /etc/kubernetes/manifests/kube-apiserver.yaml; then
+            echo "BINDING_CORRECT"
+          else
+            echo "BINDING_LOCALHOST_ONLY"
+          fi
+        else
+          echo "MANIFEST_NOT_FOUND"
+        fi
+      register: bind_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display bind address check
+      debug:
+        msg: "Bind address check: {{ bind_check.stdout }}"
+
+    - name: Fix API server bind address if needed
+      blockinfile:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        marker: "# {mark} ANSIBLE MANAGED - API Server Bind Address"
+        block: |
+          - --bind-address=0.0.0.0
+          - --advertise-address={{ master_ip }}
+        insertafter: '^\s*-\s*--authorization-mode'
+        backup: yes
+      when: 
+        - bind_check.stdout == "BINDING_LOCALHOST_ONLY"
+        - admin_conf_exists.stat.exists
+      register: bind_fix
+
+    - name: Restart kubelet to pick up API server changes
+      systemd:
+        name: kubelet
+        state: restarted
+      when: bind_fix is defined and bind_fix.changed
+
+    - name: Wait for API server to restart
+      pause:
+        seconds: 30
+      when: bind_fix is defined and bind_fix.changed
+
+    - name: Check API server health after fix
+      shell: |
+        for i in {1..30}; do
+          if kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw=/healthz 2>/dev/null | grep -q "ok"; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      register: api_health_check
+      changed_when: false
+      failed_when: false
+      when: bind_fix is defined and bind_fix.changed
+
+    - name: Check firewall rules
+      shell: |
+        echo "=== UFW Status ==="
+        ufw status 2>/dev/null || echo "UFW not active"
+        echo ""
+        echo "=== iptables rules for 6443 ==="
+        iptables -L -n | grep 6443 || echo "No iptables rules for 6443"
+      register: firewall_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display firewall status
+      debug:
+        msg: "{{ firewall_check.stdout_lines }}"
+
+    - name: Allow port 6443 in firewall if needed
+      ufw:
+        rule: allow
+        port: "6443"
+        proto: tcp
+      when: 
+        - "'Status: active' in firewall_check.stdout"
+        - "'6443' not in firewall_check.stdout"
+      register: firewall_fix
+
+    - name: Check if API server is accessible now
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf cluster-info 2>&1
+      register: cluster_info_check
+      changed_when: false
+      failed_when: false
+      when: admin_conf_exists.stat.exists
+
+    - name: Display cluster info
+      debug:
+        msg: "{{ cluster_info_check.stdout_lines }}"
+      when: cluster_info_check is defined
+
+    - name: Check kube-proxy status after API server fix
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l k8s-app=kube-proxy -o wide 2>&1 || echo "CANNOT_CHECK"
+      register: kube_proxy_status
+      changed_when: false
+      failed_when: false
+      when: admin_conf_exists.stat.exists
+
+    - name: Display kube-proxy status
+      debug:
+        msg: "{{ kube_proxy_status.stdout_lines }}"
+      when: kube_proxy_status is defined
+
+    - name: Restart kube-proxy if API server is now accessible
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete pod -n kube-system -l k8s-app=kube-proxy
+      register: restart_kube_proxy
+      changed_when: restart_kube_proxy.rc == 0
+      failed_when: false
+      when: 
+        - admin_conf_exists.stat.exists
+        - cluster_info_check.rc == 0 | default(false)
+
+    - name: Display summary and next steps
+      debug:
+        msg: |
+          ==========================================
+          API Server Connection Fix Summary
+          ==========================================
+          Master IP: {{ master_ip }}
+          API Server Listening: {{ api_listening.stdout }}
+          Bind Address: {{ bind_check.stdout }}
+          
+          Actions Taken:
+          {% if bind_fix is defined and bind_fix.changed %}
+          - Fixed API server bind address
+          - Restarted kubelet
+          {% endif %}
+          {% if firewall_fix is defined and firewall_fix.changed %}
+          - Opened firewall port 6443
+          {% endif %}
+          {% if restart_kube_proxy is defined and restart_kube_proxy.changed %}
+          - Restarted kube-proxy pods
+          {% endif %}
+          
+          Next Steps:
+          1. Wait 1-2 minutes for pods to restart
+          2. Check status: kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -A
+          3. If still failing, check:
+             - API server logs: kubectl --kubeconfig=/etc/kubernetes/admin.conf logs -n kube-system -l component=kube-apiserver
+             - kubelet logs: journalctl -u kubelet -n 50
+          ==========================================
+

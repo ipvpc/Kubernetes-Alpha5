@@ -195,6 +195,84 @@ sudo sed -i 's|server: https://127.0.0.1:6443|server: https://192.168.10.73:6443
 sudo sed -i 's|server: https://localhost:6443|server: https://192.168.10.73:6443|' /root/.kube/config
 ```
 
+## Common Error: "connection refused" to API server (kubelet can't connect)
+
+This error occurs when kubelet cannot connect to the API server at the configured address. This causes kube-proxy and other system pods to fail.
+
+**Symptoms:**
+```
+dial tcp 192.168.10.73:6443: connect: connection refused
+kube-proxy CrashLoopBackOff
+```
+
+**Root Causes:**
+1. API server binding to localhost only (not 0.0.0.0)
+2. Firewall blocking port 6443
+3. API server not running
+4. Wrong bind address in API server manifest
+
+### Quick Fix Using Playbook
+
+```bash
+cd ansible
+ansible-playbook playbooks/fix-api-server-connection.yml -i inventory-devops.yml
+```
+
+### Manual Fix
+
+```bash
+# SSH into master node
+ssh support@192.168.10.73
+
+# Check if API server is listening
+sudo netstat -tlnp | grep 6443
+# or
+sudo ss -tlnp | grep 6443
+
+# Check API server bind address
+sudo grep -E '--bind-address|--advertise-address' /etc/kubernetes/manifests/kube-apiserver.yaml
+
+# Fix bind address if it's 127.0.0.1
+sudo sed -i 's/--bind-address=127.0.0.1/--bind-address=0.0.0.0/' /etc/kubernetes/manifests/kube-apiserver.yaml
+sudo sed -i 's/--advertise-address=127.0.0.1/--advertise-address=192.168.10.73/' /etc/kubernetes/manifests/kube-apiserver.yaml
+
+# Or add if missing
+sudo sed -i '/--authorization-mode/a\    - --bind-address=0.0.0.0\n    - --advertise-address=192.168.10.73' /etc/kubernetes/manifests/kube-apiserver.yaml
+
+# Restart kubelet to pick up changes
+sudo systemctl restart kubelet
+
+# Wait for API server to restart (30-60 seconds)
+sleep 30
+
+# Check API server health
+kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw=/healthz
+
+# Check firewall
+sudo ufw status
+sudo ufw allow 6443/tcp
+
+# Restart kube-proxy
+kubectl --kubeconfig=/etc/kubernetes/admin.conf delete pod -n kube-system -l k8s-app=kube-proxy
+```
+
+### Verify Fix
+
+```bash
+# Check API server is listening
+sudo ss -tlnp | grep 6443
+# Should show: LISTEN 0 4096 0.0.0.0:6443
+
+# Check API server is accessible
+kubectl --kubeconfig=/etc/kubernetes/admin.conf cluster-info
+
+# Check kube-proxy status
+kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l k8s-app=kube-proxy
+
+# Check kubelet can connect
+sudo journalctl -u kubelet -n 50 | grep -i "connection\|refused"
+```
+
 ## Common Error: kube-proxy CrashLoopBackOff
 
 This error occurs when kube-proxy cannot start, usually because:

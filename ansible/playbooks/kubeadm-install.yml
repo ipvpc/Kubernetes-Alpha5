@@ -427,6 +427,56 @@
       debug:
         msg: "API server bind address: {{ api_bind_address.stdout }}"
 
+    - name: Fix API server bind address if binding to localhost
+      replace:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        regexp: '^\s*-\s*--bind-address=127\.0\.0\.1'
+        replace: '    - --bind-address=0.0.0.0'
+      when: 
+        - admin_conf_exists.stat.exists
+        - "'127.0.0.1' in api_bind_address.stdout"
+      register: bind_address_fix
+
+    - name: Ensure advertise address is set correctly
+      replace:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        regexp: '^\s*-\s*--advertise-address=127\.0\.0\.1'
+        replace: '    - --advertise-address={{ master_ip }}'
+      when: 
+        - admin_conf_exists.stat.exists
+        - "'127.0.0.1' in api_bind_address.stdout"
+      register: advertise_address_fix
+
+    - name: Add bind address if missing
+      lineinfile:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        line: '    - --bind-address=0.0.0.0'
+        insertafter: '^\s*-\s*--authorization-mode'
+        backup: yes
+      when: 
+        - admin_conf_exists.stat.exists
+        - api_bind_address.stdout == "bind-address not found"
+      register: add_bind_address
+
+    - name: Add advertise address if missing
+      lineinfile:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        line: '    - --advertise-address={{ master_ip }}'
+        insertafter: '^\s*-\s*--bind-address'
+        backup: yes
+      when: 
+        - admin_conf_exists.stat.exists
+        - api_bind_address.stdout == "bind-address not found"
+      register: add_advertise_address
+
+    - name: Restart kubelet if API server config was changed
+      systemd:
+        name: kubelet
+        state: restarted
+      when: 
+        - admin_conf_exists.stat.exists
+        - bind_address_fix.changed | default(false) or advertise_address_fix.changed | default(false) or add_bind_address.changed | default(false) or add_advertise_address.changed | default(false)
+
     - name: Wait for API server static pod to be created by kubelet
       shell: |
         for i in {1..60}; do
