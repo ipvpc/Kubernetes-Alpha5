@@ -90,15 +90,59 @@
           kubectl --kubeconfig=/root/.kube/config logs -n kube-system -l k8s-app=kube-proxy
           ==========================================
 
+    - name: Get kube-proxy pod name
+      shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l k8s-app=kube-proxy -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
+      register: kube_proxy_pod
+      changed_when: false
+      failed_when: false
+
     - name: Check kube-proxy logs for errors
-      shell: kubectl --kubeconfig=/root/.kube/config logs -n kube-system -l k8s-app=kube-proxy --tail=20 2>&1 | head -30
+      shell: kubectl --kubeconfig=/root/.kube/config logs -n kube-system {{ kube_proxy_pod.stdout }} --tail=50 2>&1 || echo "Could not get logs"
       register: kube_proxy_logs
       changed_when: false
       failed_when: false
-      when: "'CrashLoopBackOff' in final_status.stdout or 'Error' in final_status.stdout"
+      when: kube_proxy_pod.stdout != ""
 
     - name: Display kube-proxy error logs
       debug:
         msg: "{{ kube_proxy_logs.stdout_lines }}"
       when: kube_proxy_logs is defined
+
+    - name: Check kube-proxy describe for more details
+      shell: kubectl --kubeconfig=/root/.kube/config describe pod -n kube-system {{ kube_proxy_pod.stdout }} 2>&1 | grep -A 20 "Events:" || echo "Could not describe pod"
+      register: kube_proxy_describe
+      changed_when: false
+      failed_when: false
+      when: kube_proxy_pod.stdout != ""
+
+    - name: Display kube-proxy describe events
+      debug:
+        msg: "{{ kube_proxy_describe.stdout_lines }}"
+      when: kube_proxy_describe is defined
+
+    - name: Check if issue is CNI-related
+      debug:
+        msg: |
+          ==========================================
+          TROUBLESHOOTING TIPS:
+          ==========================================
+          1. If logs show "connection refused" or "no route to host":
+             - CNI plugin may not be ready
+             - Check: kubectl get pods -n kube-flannel
+             - Wait for CNI pods to be Running
+          
+          2. If logs show "image pull" errors:
+             - Check network connectivity
+             - Verify image registry is accessible
+          
+          3. If logs show "permission denied" or "access denied":
+             - Check RBAC configuration
+             - Verify service account permissions
+          
+          4. Common fix sequence:
+             a. Ensure CNI is installed and ready
+             b. Delete kube-proxy pods to restart
+             c. Wait for pods to come back up
+          ==========================================
+      when: "'CrashLoopBackOff' in final_status.stdout or 'Error' in final_status.stdout"
 
