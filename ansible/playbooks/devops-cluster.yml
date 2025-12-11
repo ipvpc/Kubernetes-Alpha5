@@ -39,14 +39,26 @@
     setup_network_isolation: true
   
   tasks:
+    - name: Check if admin.conf exists
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_check
+
+    - name: Check if copied kubeconfig exists
+      stat:
+        path: /root/.kube/config
+      register: copied_kubeconfig_check
+
     - name: Set kubeconfig path
       set_fact:
-        kubeconfig: "{{ '/etc/kubernetes/admin.conf' if (stat('/etc/kubernetes/admin.conf') | default({'stat': {'exists': False}})).stat.exists else '/root/.kube/config' }}"
+        kubeconfig: "{{ '/etc/kubernetes/admin.conf' if admin_conf_check.stat.exists else '/root/.kube/config' }}"
+      when: admin_conf_check.stat.exists or copied_kubeconfig_check.stat.exists
 
     - name: Check if kubeconfig exists
       stat:
         path: "{{ kubeconfig }}"
       register: kubeconfig_check
+      when: admin_conf_check.stat.exists or copied_kubeconfig_check.stat.exists
 
     - name: Set cluster context name
       shell: |
