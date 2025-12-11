@@ -382,32 +382,87 @@
         msg: "{{ kubeadm_init.stdout_lines }}"
       when: kubeadm_init.stdout_lines is defined
 
-    - name: Extract all kubeadm join commands
+    - name: Extract all kubeadm join commands from stdout
       set_fact:
-        all_join_commands: "{{ kubeadm_init.stdout_lines | select('match', 'kubeadm join') | list }}"
+        all_join_commands_stdout: "{{ kubeadm_init.stdout_lines | default([]) | select('match', 'kubeadm join') | list }}"
 
-    - name: Debug join commands
+    - name: Extract all kubeadm join commands from stderr
+      set_fact:
+        all_join_commands_stderr: "{{ kubeadm_init.stderr_lines | default([]) | select('match', 'kubeadm join') | list }}"
+
+    - name: Combine join commands from stdout and stderr
+      set_fact:
+        all_join_commands: "{{ (all_join_commands_stdout | default([])) + (all_join_commands_stderr | default([])) }}"
+
+    - name: Debug join commands found
       debug:
         msg: "Found join commands: {{ all_join_commands }}"
-      when: all_join_commands is defined
-
-    - name: Debug first join command
-      debug:
-        msg: "First join command (raw): {{ all_join_commands[0] | default('NOT_FOUND') }}"
       when: all_join_commands is defined and all_join_commands | length > 0
 
-    - name: Debug last join command
-      debug:
-        msg: "Last join command (raw): {{ all_join_commands[-1] | default('NOT_FOUND') }}"
-      when: all_join_commands is defined and all_join_commands | length > 0
+    - name: Generate join token if join commands not found
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf create token --ttl=24h --print-join-command 2>/dev/null || \
+        kubeadm token create --print-join-command 2>/dev/null || echo "TOKEN_CREATE_FAILED"
+      register: generated_join_command
+      changed_when: generated_join_command.rc == 0
+      failed_when: false
+      when: 
+        - admin_conf_exists.stat.exists
+        - all_join_commands | default([]) | length == 0
+
+    - name: Extract join command from generated token
+      set_fact:
+        generated_join_cmd: "{{ generated_join_command.stdout | default('') | trim }}"
+      when: 
+        - generated_join_command is defined
+        - generated_join_command.rc == 0
+        - "'TOKEN_CREATE_FAILED' not in generated_join_command.stdout"
+
+    - name: Get CA cert hash for join command
+      shell: |
+        openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //' || echo "HASH_FAILED"
+      register: ca_cert_hash
+      changed_when: false
+      failed_when: false
+      when: 
+        - admin_conf_exists.stat.exists
+        - all_join_commands | default([]) | length == 0
+
+    - name: Get bootstrap token
+      shell: |
+        kubeadm token list -o jsonpath='{.items[0].token}' 2>/dev/null || echo "TOKEN_NOT_FOUND"
+      register: bootstrap_token
+      changed_when: false
+      failed_when: false
+      when: 
+        - admin_conf_exists.stat.exists
+        - all_join_commands | default([]) | length == 0
+
+    - name: Build join command manually if needed
+      set_fact:
+        manual_join_command: "kubeadm join {{ master_ip }}:6443 --token {{ bootstrap_token.stdout }} --discovery-token-ca-cert-hash sha256:{{ ca_cert_hash.stdout }} --cri-socket={{ cri_socket }}"
+      when: 
+        - admin_conf_exists.stat.exists
+        - all_join_commands | default([]) | length == 0
+        - bootstrap_token.stdout != "TOKEN_NOT_FOUND"
+        - ca_cert_hash.stdout != "HASH_FAILED"
 
     - name: Save kubeadm join command for control plane
       set_fact:
-        kubeadm_join_command: "{{ (all_join_commands[0] | default('')) | string | trim }}"
+        kubeadm_join_command: "{{ (all_join_commands[0] | default(generated_join_cmd | default(manual_join_command | default('')))) | string | trim }}"
+      when: admin_conf_exists.stat.exists
 
     - name: Save kubeadm join command for workers
       set_fact:
-        kubeadm_join_command_worker: "{{ (all_join_commands[-1] | default(all_join_commands[0] | default(''))) | string | trim }}"
+        kubeadm_join_command_worker: "{{ (all_join_commands[-1] | default(all_join_commands[0] | default(generated_join_cmd | default(manual_join_command | default(''))))) | string | trim }}"
+      when: admin_conf_exists.stat.exists
+
+    - name: Display final join commands
+      debug:
+        msg: |
+          Control plane join command: {{ kubeadm_join_command | default('NOT_SET') }}
+          Worker join command: {{ kubeadm_join_command_worker | default('NOT_SET') }}
+      when: admin_conf_exists.stat.exists
 
     - name: Create .kube directory
       file:
