@@ -33,9 +33,9 @@ variable "rancher_bootstrap_password" {
 }
 
 variable "rancher_chart_version" {
-  description = "Rancher Helm chart version"
+  description = "Rancher Helm chart version (leave empty to use latest from stable repository)"
   type        = string
-  default     = "2.9.0"
+  default     = ""
 }
 
 variable "rancher_replicas" {

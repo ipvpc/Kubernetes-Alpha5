@@ -203,7 +203,9 @@ resource "helm_release" "rancher" {
   name       = "rancher"
   repository = "https://releases.rancher.com/server-charts/stable"
   chart      = "rancher"
-  version    = var.rancher_chart_version
+  # Use latest version from stable if not specified
+  # Version 2.9.0 doesn't exist in stable, so we'll use latest available
+  version    = var.rancher_chart_version != "" ? var.rancher_chart_version : null
   namespace  = kubernetes_namespace.rancher.metadata[0].name
 
   set {
