@@ -46,3 +46,9 @@ common_labels = {
   cluster-type = "manager"
 }
 
+# Traefik External IPs (use node IPs to make internal and external IPs the same)
+ingress_external_ips = [
+  "192.168.10.70",  # Replace with your actual node IPs
+  "192.168.10.71",
+  "192.168.10.72"
+]
