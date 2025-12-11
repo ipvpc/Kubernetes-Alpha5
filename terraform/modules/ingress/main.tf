@@ -39,6 +39,15 @@ resource "helm_release" "nginx_ingress" {
   # Wait for ingress controller to be fully deployed
   wait = true
   timeout = 600
+  
+  # Allow Helm to skip hooks during uninstall if needed
+  skip_crds = false
+  
+  # Lifecycle: prevent destroy issues by allowing replacement
+  lifecycle {
+    create_before_destroy = false
+    ignore_changes = []
+  }
 
   depends_on = [kubernetes_namespace.ingress]
 }
