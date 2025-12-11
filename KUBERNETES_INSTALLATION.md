@@ -92,7 +92,7 @@ cni_plugin: "flannel"  # or "calico"
 
 **Windows (PowerShell):**
 ```powershell
-.\scripts\install-kubernetes.ps1 manager kubeadm
+.\scripts\install-kubernetes.sh manager kubeadm
 ```
 
 **Or manually with Ansible:**

@@ -1,0 +1,74 @@
+---
+# Ansible Playbook: Create DevOps Kubernetes Cluster
+# This playbook creates a Kubernetes cluster named "devops"
+# Usage: ansible-playbook playbooks/devops-cluster.yml -i ../inventory-devops.yml
+
+- name: Pre-installation information
+  hosts: all
+  become: false
+  gather_facts: false
+  
+  vars:
+    cluster_name: "devops"
+  
+  tasks:
+    - name: Display cluster information
+      debug:
+        msg: |
+          ==========================================
+          Creating Kubernetes Cluster: {{ cluster_name }}
+          Install Method: {{ install_method | default('kubeadm') }}
+          ==========================================
+          Control Plane Nodes: {{ groups['control_plane'] | default([]) | length }}
+          Worker Nodes: {{ groups['workers'] | default([]) | length }}
+          ==========================================
+
+- import_playbook: kubeadm-install.yml
+  when: install_method | default('kubeadm') == "kubeadm"
+
+- import_playbook: k3s-install.yml
+  when: install_method | default('kubeadm') == "k3s"
+
+- name: Post-installation tasks for DevOps cluster
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  
+  vars:
+    cluster_name: "devops"
+  
+  tasks:
+    - name: Set cluster context name
+      shell: |
+        kubectl config --kubeconfig=/root/.kube/config rename-context default {{ cluster_name }} 2>/dev/null || \
+        kubectl config --kubeconfig=/root/.kube/config set-context {{ cluster_name }} --cluster=kubernetes --user=kubernetes-admin 2>/dev/null || true
+      changed_when: false
+      ignore_errors: yes
+    
+    - name: Verify cluster is ready
+      shell: kubectl --kubeconfig=/root/.kube/config get nodes -o wide
+      register: cluster_status
+      changed_when: false
+      ignore_errors: yes
+    
+    - name: Display cluster status
+      debug:
+        msg: "{{ cluster_status.stdout_lines | default(['Cluster status check failed']) }}"
+      when: cluster_status is defined
+    
+    - name: Display cluster information
+      debug:
+        msg: |
+          ==========================================
+          DevOps Kubernetes Cluster Created!
+          Cluster Name: {{ cluster_name }}
+          ==========================================
+          To access the cluster:
+          1. Copy kubeconfig from master node:
+             scp {{ ansible_user | default('root') }}@{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}:/root/.kube/config ~/.kube/config-{{ cluster_name }}
+          2. Set KUBECONFIG:
+             export KUBECONFIG=~/.kube/config-{{ cluster_name }}
+          3. Verify cluster:
+             kubectl get nodes
+          ==========================================
+
