@@ -196,8 +196,19 @@ case $ACTION in
         ;;
     apply)
         if [ -f "tfplan-$ENVIRONMENT" ]; then
-            echo "Applying Terraform plan..."
-            terraform apply "tfplan-$ENVIRONMENT"
+            echo "Checking if saved plan is still valid..."
+            # Check if plan is stale by trying to validate it
+            if terraform show "tfplan-$ENVIRONMENT" >/dev/null 2>&1; then
+                echo "Applying saved Terraform plan..."
+                terraform apply "tfplan-$ENVIRONMENT"
+            else
+                echo "Saved plan is stale. Regenerating plan..."
+                terraform plan \
+                    -var-file="../environments/$ENVIRONMENT/terraform.tfvars" \
+                    -out="tfplan-$ENVIRONMENT"
+                echo "Applying new plan..."
+                terraform apply "tfplan-$ENVIRONMENT"
+            fi
         else
             echo "No plan file found. Running terraform apply..."
             terraform apply \
