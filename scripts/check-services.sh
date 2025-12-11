@@ -24,8 +24,12 @@ kubectl get clusterissuer 2>/dev/null || echo "No ClusterIssuer found"
 echo ""
 echo "4. Rancher:"
 kubectl get pods -n cattle-system
+echo ""
+echo "   Services in cattle-system:"
 kubectl get service -n cattle-system
-kubectl get ingress -n cattle-system 2>/dev/null || echo "No Ingress found"
+echo ""
+echo "   Ingress:"
+kubectl get ingress -n cattle-system 2>/dev/null || echo "   No Ingress found"
 
 echo ""
 echo "5. Access Information:"
@@ -35,16 +39,24 @@ kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.sta
 echo "   (Pending or using NodePort)"
 
 echo ""
-echo "   Rancher Access (if configured):"
+echo "   Rancher Access:"
+RANCHER_SERVICE=$(kubectl get services -n cattle-system -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 RANCHER_HOST=$(kubectl get ingress -n cattle-system -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || echo "")
-if [ -n "$RANCHER_HOST" ]; then
-    echo "   - Hostname: $RANCHER_HOST"
-    echo "   - HTTP:  http://$RANCHER_HOST"
-    echo "   - HTTPS: https://$RANCHER_HOST"
+
+if [ -n "$RANCHER_SERVICE" ]; then
+    echo "   - Service: $RANCHER_SERVICE"
+    if [ -n "$RANCHER_HOST" ]; then
+        echo "   - Hostname: $RANCHER_HOST"
+        echo "   - HTTP:  http://$RANCHER_HOST"
+        echo "   - HTTPS: https://$RANCHER_HOST"
+    else
+        echo "   - Ingress not configured"
+        echo "   - Use port-forward: kubectl port-forward -n cattle-system svc/$RANCHER_SERVICE 8080:80"
+        echo "   - Then access: http://localhost:8080"
+    fi
 else
-    echo "   - Not configured via Ingress"
-    echo "   - Use port-forward: kubectl port-forward -n cattle-system svc/rancher 8080:80"
-    echo "   - Then access: http://localhost:8080"
+    echo "   - Rancher service not found. Deployment may be in progress or failed."
+    echo "   - Check pods: kubectl get pods -n cattle-system"
 fi
 
 echo ""
