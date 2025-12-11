@@ -13,11 +13,14 @@ enable_rancher = true
 rancher_hostname         = "rancher.alpha5.finance"  # Change to your domain
 rancher_bootstrap_password = "p0w3rb4r"        # Change to a secure password
 rancher_replicas         = 3                       # HA setup with 3 replicas
-rancher_tls_source       = "letsEncrypt"           # Options: rancher, letsEncrypt, secret
+rancher_tls_source       = "rancher"               # Options: rancher (self-signed), letsEncrypt, secret
+                                                    # Use "rancher" for HTTP access or quick setup
+                                                    # Use "letsEncrypt" for production HTTPS
 rancher_ingress_class     = "nginx"
 
 # Let's Encrypt Configuration
-enable_letsencrypt       = true
+# Set to false if you want to use HTTP only or self-signed certs (faster setup)
+enable_letsencrypt       = false
 letsencrypt_email        = "nfernandes@alpha5cloud.com"     # Change to your email
 letsencrypt_issuer_name  = "letsencrypt-prod"
 
