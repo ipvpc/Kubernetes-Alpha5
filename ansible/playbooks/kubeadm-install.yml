@@ -97,6 +97,7 @@
           apt:
             name:
               - containerd
+              - cri-tools
             state: present
           when: ansible_os_family == "Debian"
 
@@ -104,24 +105,52 @@
           yum:
             name:
               - containerd.io
+              - cri-tools
             state: present
           when: ansible_os_family == "RedHat"
 
-        - name: Configure containerd
-          copy:
-            content: |
-              [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
-                [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
-                  SystemdCgroup = true
-            dest: /etc/containerd/config.toml
-            mode: '0644'
-          notify: restart containerd
+        - name: Create containerd config directory
+          file:
+            path: /etc/containerd
+            state: directory
+            mode: '0755'
 
-        - name: Enable and start containerd
+        - name: Generate default containerd config
+          shell: containerd config default > /etc/containerd/config.toml
+          args:
+            creates: /etc/containerd/config.toml
+          changed_when: false
+
+        - name: Update pause image to version 3.9
+          replace:
+            path: /etc/containerd/config.toml
+            regexp: 'sandbox_image = ".*"'
+            replace: 'sandbox_image = "registry.k8s.io/pause:3.9"'
+
+        - name: Ensure SystemdCgroup is enabled
+          replace:
+            path: /etc/containerd/config.toml
+            regexp: 'SystemdCgroup = false'
+            replace: 'SystemdCgroup = true'
+
+        - name: Ensure SystemdCgroup is set if not present
+          lineinfile:
+            path: /etc/containerd/config.toml
+            regexp: '^\s*SystemdCgroup\s*='
+            line: '            SystemdCgroup = true'
+            insertafter: '\[plugins\."io\.containerd\.grpc\.v1\.cri"\.containerd\.runtimes\.runc\.options\]'
+            backup: yes
+
+        - name: Restart containerd to apply configuration
           systemd:
             name: containerd
+            state: restarted
             enabled: true
-            state: started
+
+        - name: Wait for containerd to be ready
+          wait_for:
+            path: /var/run/containerd/containerd.sock
+            timeout: 30
       when: container_runtime == "containerd"
 
     - name: Install kubeadm, kubelet, kubectl
@@ -186,6 +215,7 @@
       systemd:
         name: containerd
         state: restarted
+      listen: restart_containerd
 
 - name: Initialize Kubernetes cluster (first master only)
   hosts: control_plane[0]
@@ -211,6 +241,49 @@
       when: kubeconfig_exists.stat.exists
       ignore_errors: yes
 
+    - name: Verify containerd is running
+      systemd:
+        name: containerd
+        state: started
+      register: containerd_status
+
+    - name: Wait for containerd socket
+      wait_for:
+        path: /var/run/containerd/containerd.sock
+        timeout: 30
+
+    - name: Test containerd CRI interface
+      shell: |
+        crictl --runtime-endpoint=unix:///var/run/containerd/containerd.sock version
+      register: crictl_test
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Display containerd CRI status
+      debug:
+        msg: "Containerd CRI interface: {{ 'Working' if crictl_test.rc == 0 else 'Not responding - this may cause issues' }}"
+
+    - name: Pre-pull Kubernetes images before init
+      shell: |
+        kubeadm config images pull --kubernetes-version={{ kubernetes_version }} --cri-socket={{ cri_socket }}
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Check for partial cluster initialization
+      stat:
+        path: /etc/kubernetes/manifests
+      register: manifests_exist
+
+    - name: Clean up partial initialization if needed
+      shell: |
+        if [ -d /etc/kubernetes/manifests ] && [ ! -f /etc/kubernetes/admin.conf ]; then
+          kubeadm reset --force --cri-socket={{ cri_socket }} || true
+          rm -rf /etc/kubernetes/manifests/* || true
+        fi
+      when: manifests_exist.stat.exists
+      ignore_errors: yes
+      changed_when: false
+
     - name: Initialize Kubernetes cluster
       shell: >
         kubeadm init
@@ -219,8 +292,31 @@
         --control-plane-endpoint={{ master_ip }}:6443
         --upload-certs
         --cri-socket={{ cri_socket }}
+        --image-repository=registry.k8s.io
       register: kubeadm_init
       changed_when: true
+      failed_when: false
+
+    - name: Check if kubeadm init succeeded
+      fail:
+        msg: |
+          kubeadm init failed with return code {{ kubeadm_init.rc }}
+          Error output: {{ kubeadm_init.stderr | default('No error output') }}
+          The cluster may have partially initialized. Check the logs and consider running:
+          kubeadm reset --force --cri-socket={{ cri_socket }}
+      when: kubeadm_init.rc != 0
+
+    - name: Check if admin.conf was created (cluster initialized successfully)
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_exists
+
+    - name: Warn if cluster partially initialized
+      debug:
+        msg: |
+          WARNING: kubeadm init completed but admin.conf not found.
+          This may indicate a partial initialization. Check the output above.
+      when: not admin_conf_exists.stat.exists
 
     - name: Debug kubeadm init output
       debug:
