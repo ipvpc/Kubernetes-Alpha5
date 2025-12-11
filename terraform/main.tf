@@ -51,7 +51,8 @@ module "ingress" {
 
   source = "./modules/ingress"
 
-  environment = var.environment
+  environment            = var.environment
+  ingress_external_ips   = var.ingress_external_ips
 }
 
 # Deploy Monitoring Stack (optional)

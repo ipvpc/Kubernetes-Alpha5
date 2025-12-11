@@ -55,6 +55,12 @@ variable "enable_ingress_controller" {
   default     = false
 }
 
+variable "ingress_external_ips" {
+  description = "External IPs for Traefik service (use node IPs when hostNetwork is true to make internal and external IPs the same)"
+  type        = list(string)
+  default     = []
+}
+
 variable "enable_monitoring" {
   description = "Enable monitoring stack (Prometheus/Grafana)"
   type        = bool

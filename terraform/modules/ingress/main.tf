@@ -25,6 +25,9 @@ resource "helm_release" "traefik" {
       }
       service = {
         type = var.ingress_service_type
+        # With hostNetwork: true, use NodePort or ClusterIP and set externalIPs
+        # This makes internal and external IPs the same
+        externalIPs = var.ingress_external_ips
       }
       # Use hostNetwork to allow binding to privileged ports
       hostNetwork = true

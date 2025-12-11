@@ -57,3 +57,9 @@ variable "ingress_service_type" {
   default     = "LoadBalancer"
 }
 
+variable "ingress_external_ips" {
+  description = "External IPs for the ingress service (use node IPs when hostNetwork is true)"
+  type        = list(string)
+  default     = []
+}
+
