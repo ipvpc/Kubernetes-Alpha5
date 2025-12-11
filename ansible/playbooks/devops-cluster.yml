@@ -36,7 +36,7 @@
   
   vars:
     cluster_name: "devops"
-    setup_network_isolation: true
+    setup_network_isolation: false
   
   tasks:
     - name: Check if admin.conf exists
@@ -113,7 +113,8 @@
       when: 
         - kubeconfig_check.stat.exists
         - setup_network_isolation | bool
-        - calico_wait.rc == 0 | default(false)
+        - calico_wait is defined
+        - (calico_wait.rc | default(999)) == 0
 
     - name: Setup allow DNS network policy
       shell: |
@@ -144,7 +145,8 @@
       when: 
         - kubeconfig_check.stat.exists
         - setup_network_isolation | bool
-        - calico_wait.rc == 0 | default(false)
+        - calico_wait is defined
+        - (calico_wait.rc | default(999)) == 0
 
     - name: Display network policies created
       shell: kubectl --kubeconfig={{ kubeconfig }} get networkpolicies -A

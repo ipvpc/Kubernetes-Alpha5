@@ -340,6 +340,79 @@ sudo cat /etc/kubernetes/controller-manager.conf | grep server
 curl -k https://127.0.0.1:6443/healthz
 ```
 
+## Common Error: "x509: certificate signed by unknown authority"
+
+This error occurs when kubectl cannot verify the Kubernetes API server certificate.
+
+**Symptoms:**
+```
+Unable to connect to the server: tls: failed to verify certificate: 
+x509: certificate signed by unknown authority
+```
+
+**Root Causes:**
+1. kubeconfig server endpoint doesn't match certificate
+2. Certificate authority data missing or corrupted
+3. kubeconfig copied incorrectly
+4. Server address mismatch
+
+### Quick Fix Using Playbook
+
+```bash
+cd ansible
+ansible-playbook playbooks/fix-kubeconfig-certificate.yml -i inventory-devops.yml
+```
+
+### Manual Fix
+
+```bash
+# SSH into master node
+ssh support@192.168.10.73
+
+# Option 1: Use admin.conf directly (always works on master)
+kubectl --kubeconfig=/etc/kubernetes/admin.conf cluster-info
+
+# Option 2: Copy fresh admin.conf
+sudo cp /etc/kubernetes/admin.conf /root/.kube/config
+
+# Option 3: Update server endpoint in kubeconfig
+sudo sed -i 's|server: https://127.0.0.1:6443|server: https://192.168.10.73:6443|' /root/.kube/config
+sudo sed -i 's|server: https://localhost:6443|server: https://192.168.10.73:6443|' /root/.kube/config
+
+# Verify
+kubectl --kubeconfig=/root/.kube/config cluster-info
+```
+
+### Check Certificate
+
+```bash
+# Check certificate in kubeconfig
+kubectl --kubeconfig=/root/.kube/config config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d | openssl x509 -text -noout
+
+# Check server endpoint
+kubectl --kubeconfig=/root/.kube/config config view -o jsonpath='{.clusters[0].cluster.server}'
+```
+
+### Regenerate kubeconfig
+
+If the above doesn't work:
+
+```bash
+# Backup old config
+sudo cp /root/.kube/config /root/.kube/config.backup
+
+# Copy fresh admin.conf
+sudo cp /etc/kubernetes/admin.conf /root/.kube/config
+
+# Update server endpoint
+MASTER_IP=192.168.10.73
+sudo sed -i "s|server: https://127.0.0.1:6443|server: https://$MASTER_IP:6443|" /root/.kube/config
+sudo sed -i "s|server: https://localhost:6443|server: https://$MASTER_IP:6443|" /root/.kube/config
+
+# Verify
+kubectl --kubeconfig=/root/.kube/config cluster-info
+```
+
 ## Common Error: kube-proxy CrashLoopBackOff
 
 This error occurs when kube-proxy cannot start, usually because:
