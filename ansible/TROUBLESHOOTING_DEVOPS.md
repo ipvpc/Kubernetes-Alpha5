@@ -137,3 +137,105 @@ sudo rm -rf /etc/kubernetes /var/lib/etcd /etc/cni/net.d
 # Then re-run playbook
 ```
 
+## Common Error: kube-proxy CrashLoopBackOff
+
+This error occurs when kube-proxy cannot start, usually because:
+
+1. **CNI plugin not installed** - kube-proxy needs the CNI network plugin to be ready
+2. **Network configuration issues** - IP forwarding or bridge networking not configured
+3. **Image pull failures** - kube-proxy image cannot be pulled
+
+### Quick Fix Using Playbook
+
+```bash
+cd ansible
+ansible-playbook playbooks/fix-kube-proxy.yml -i inventory-devops.yml
+```
+
+### Manual Fix
+
+```bash
+# SSH into master node
+ssh support@192.168.10.73
+
+# Check if CNI is installed
+kubectl get pods -n kube-flannel
+# or for Calico:
+kubectl get pods -n kube-system -l k8s-app=calico-node
+
+# If CNI is not installed, install Flannel:
+kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+
+# Wait for CNI to be ready
+kubectl wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s
+
+# Delete and restart kube-proxy pods
+kubectl delete pod -n kube-system -l k8s-app=kube-proxy
+
+# Wait for kube-proxy to restart
+kubectl wait --for=condition=ready pod -l k8s-app=kube-proxy -n kube-system --timeout=180s
+
+# Check status
+kubectl get pods -n kube-system -l k8s-app=kube-proxy
+```
+
+### Check kube-proxy Logs
+
+```bash
+# Get kube-proxy pod name
+kubectl get pods -n kube-system -l k8s-app=kube-proxy
+
+# Check logs
+kubectl logs -n kube-system <kube-proxy-pod-name>
+
+# Check all kube-proxy logs
+kubectl logs -n kube-system -l k8s-app=kube-proxy --tail=50
+```
+
+### Verify Network Configuration
+
+```bash
+# Check IP forwarding
+sysctl net.ipv4.ip_forward
+# Should output: net.ipv4.ip_forward = 1
+
+# Check bridge networking
+lsmod | grep br_netfilter
+# Should show br_netfilter module loaded
+
+# Check sysctl settings
+cat /etc/sysctl.d/99-kubernetes.conf
+```
+
+### If kube-proxy Still Fails
+
+1. **Check node status:**
+   ```bash
+   kubectl get nodes
+   kubectl describe node <node-name>
+   ```
+
+2. **Check kubelet logs:**
+   ```bash
+   sudo journalctl -u kubelet -n 100
+   ```
+
+3. **Verify CNI is working:**
+   ```bash
+   # Check CNI pods are running
+   kubectl get pods -n kube-flannel
+   kubectl get pods -n kube-system -l k8s-app=calico-node
+   
+   # Check CNI logs
+   kubectl logs -n kube-flannel -l app=flannel
+   ```
+
+4. **Reinstall CNI if needed:**
+   ```bash
+   # Remove existing CNI
+   kubectl delete -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+   
+   # Reinstall
+   kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+   ```
+

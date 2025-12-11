@@ -379,15 +379,72 @@
 
     - name: Install CNI plugin (Flannel)
       shell: kubectl --kubeconfig=/root/.kube/config apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      register: cni_install
+      retries: 3
+      delay: 10
+      until: cni_install.rc == 0
       when: 
         - cni_plugin == "flannel"
         - kubeconfig_stat.stat.exists
 
     - name: Install CNI plugin (Calico)
       shell: kubectl --kubeconfig=/root/.kube/config apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml
+      register: cni_install
+      retries: 3
+      delay: 10
+      until: cni_install.rc == 0
       when:
         - cni_plugin == "calico"
         - kubeconfig_stat.stat.exists
+
+    - name: Wait for CNI pods to be ready
+      shell: |
+        kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s || \
+        kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s || true
+      register: cni_wait
+      retries: 10
+      delay: 10
+      until: cni_wait.rc == 0
+      changed_when: false
+      when: kubeconfig_stat.stat.exists
+
+    - name: Check kube-proxy status
+      shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l k8s-app=kube-proxy -o jsonpath='{.items[*].status.phase}'
+      register: kube_proxy_status
+      changed_when: false
+      failed_when: false
+      when: kubeconfig_stat.stat.exists
+
+    - name: Restart kube-proxy if in CrashLoopBackOff
+      shell: |
+        kubectl --kubeconfig=/root/.kube/config delete pod -n kube-system -l k8s-app=kube-proxy
+        sleep 5
+      when: 
+        - kubeconfig_stat.stat.exists
+        - "'CrashLoopBackOff' in kube_proxy_status.stdout or 'Error' in kube_proxy_status.stdout"
+
+    - name: Wait for kube-proxy to be ready
+      shell: kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l k8s-app=kube-proxy -n kube-system --timeout=180s
+      register: kube_proxy_wait
+      retries: 6
+      delay: 10
+      until: kube_proxy_wait.rc == 0
+      changed_when: false
+      ignore_errors: yes
+      when: kubeconfig_stat.stat.exists
+
+    - name: Display kube-proxy status
+      shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l k8s-app=kube-proxy
+      register: kube_proxy_pods
+      changed_when: false
+      when: kubeconfig_stat.stat.exists
+
+    - name: Show kube-proxy pod status
+      debug:
+        msg: "{{ kube_proxy_pods.stdout_lines }}"
+      when: 
+        - kubeconfig_stat.stat.exists
+        - kube_proxy_pods is defined
 
 - name: Join additional control plane nodes
   hosts: control_plane[1:]

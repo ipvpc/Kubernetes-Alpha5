@@ -1,0 +1,104 @@
+---
+# Quick Fix Playbook: Fix kube-proxy CrashLoopBackOff
+# This playbook fixes kube-proxy issues after cluster initialization
+# Usage: ansible-playbook playbooks/fix-kube-proxy.yml -i inventory-devops.yml
+
+- name: Fix kube-proxy CrashLoopBackOff
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Check if kubeconfig exists
+      stat:
+        path: /root/.kube/config
+      register: kubeconfig_stat
+
+    - name: Fail if kubeconfig not found
+      fail:
+        msg: "kubeconfig not found at /root/.kube/config. Please ensure cluster is initialized."
+      when: not kubeconfig_stat.stat.exists
+
+    - name: Check CNI plugin status
+      shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-flannel -o jsonpath='{.items[*].status.phase}' 2>/dev/null || kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l k8s-app=calico-node -o jsonpath='{.items[*].status.phase}' 2>/dev/null || echo "CNI not found"
+      register: cni_status
+      changed_when: false
+      failed_when: false
+
+    - name: Install CNI plugin if not present (Flannel)
+      shell: |
+        kubectl --kubeconfig=/root/.kube/config apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+      when: 
+        - "'CNI not found' in cni_status.stdout or cni_status.stdout == ''"
+        - cni_plugin | default('flannel') == "flannel"
+      register: cni_install
+      retries: 3
+      delay: 10
+
+    - name: Wait for CNI to be ready
+      shell: |
+        kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s || \
+        kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s || true
+      register: cni_wait
+      retries: 10
+      delay: 10
+      until: cni_wait.rc == 0
+      changed_when: false
+
+    - name: Get kube-proxy pods status
+      shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l k8s-app=kube-proxy -o wide
+      register: kube_proxy_status
+      changed_when: false
+
+    - name: Display kube-proxy status
+      debug:
+        msg: "{{ kube_proxy_status.stdout_lines }}"
+
+    - name: Delete kube-proxy pods to restart them
+      shell: |
+        kubectl --kubeconfig=/root/.kube/config delete pod -n kube-system -l k8s-app=kube-proxy
+      register: delete_result
+      changed_when: delete_result.rc == 0
+      ignore_errors: yes
+
+    - name: Wait for kube-proxy pods to restart
+      pause:
+        seconds: 10
+
+    - name: Wait for kube-proxy to be ready
+      shell: kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l k8s-app=kube-proxy -n kube-system --timeout=180s
+      register: kube_proxy_wait
+      retries: 6
+      delay: 10
+      until: kube_proxy_wait.rc == 0
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Get final kube-proxy status
+      shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l k8s-app=kube-proxy
+      register: final_status
+      changed_when: false
+
+    - name: Display final status
+      debug:
+        msg: |
+          ==========================================
+          kube-proxy Status:
+          {{ final_status.stdout }}
+          ==========================================
+          If pods are still in CrashLoopBackOff, check logs:
+          kubectl --kubeconfig=/root/.kube/config logs -n kube-system -l k8s-app=kube-proxy
+          ==========================================
+
+    - name: Check kube-proxy logs for errors
+      shell: kubectl --kubeconfig=/root/.kube/config logs -n kube-system -l k8s-app=kube-proxy --tail=20 2>&1 | head -30
+      register: kube_proxy_logs
+      changed_when: false
+      failed_when: false
+      when: "'CrashLoopBackOff' in final_status.stdout or 'Error' in final_status.stdout"
+
+    - name: Display kube-proxy error logs
+      debug:
+        msg: "{{ kube_proxy_logs.stdout_lines }}"
+      when: kube_proxy_logs is defined
+
