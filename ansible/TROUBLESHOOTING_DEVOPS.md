@@ -273,6 +273,73 @@ kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l k8s-a
 sudo journalctl -u kubelet -n 50 | grep -i "connection\|refused"
 ```
 
+## Common Error: Control Plane Components CrashLoopBackOff (kube-scheduler, kube-controller-manager)
+
+Control plane components (kube-scheduler, kube-controller-manager) failing usually indicates API server connectivity issues.
+
+**Symptoms:**
+```
+kube-scheduler CrashLoopBackOff
+kube-controller-manager CrashLoopBackOff
+```
+
+**Root Causes:**
+1. API server not accessible (connection refused)
+2. API server bind address incorrect
+3. Scheduler/Controller kubeconfig pointing to wrong address
+4. API server not ready when components start
+
+### Quick Fix Using Playbook
+
+```bash
+cd ansible
+ansible-playbook playbooks/fix-control-plane-components.yml -i inventory-devops.yml
+```
+
+### Manual Fix
+
+```bash
+# SSH into master node
+ssh support@192.168.10.73
+
+# Check all control plane pods
+kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l tier=control-plane
+
+# Check scheduler logs
+kubectl --kubeconfig=/etc/kubernetes/admin.conf logs -n kube-system -l component=kube-scheduler --tail=50
+
+# Check controller manager logs
+kubectl --kubeconfig=/etc/kubernetes/admin.conf logs -n kube-system -l component=kube-controller-manager --tail=50
+
+# Verify API server is accessible
+kubectl --kubeconfig=/etc/kubernetes/admin.conf cluster-info
+
+# If API server is not accessible, fix it first (see "connection refused" section)
+
+# Restart kubelet to reload static pods
+sudo systemctl restart kubelet
+
+# Wait for pods to restart (30-60 seconds)
+sleep 30
+
+# Check status again
+kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l tier=control-plane
+```
+
+### Check Scheduler/Controller Kubeconfigs
+
+```bash
+# Check scheduler kubeconfig
+sudo cat /etc/kubernetes/scheduler.conf | grep server
+
+# Check controller manager kubeconfig
+sudo cat /etc/kubernetes/controller-manager.conf | grep server
+
+# If they point to localhost, they should work (static pods use localhost)
+# But verify API server is accessible on localhost
+curl -k https://127.0.0.1:6443/healthz
+```
+
 ## Common Error: kube-proxy CrashLoopBackOff
 
 This error occurs when kube-proxy cannot start, usually because:
