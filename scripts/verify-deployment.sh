@@ -18,8 +18,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 check_namespace() {
-    local namespace=$1
-    if kubectl get namespace "$namespace" &>/dev/null; then
+    namespace=$1
+    if kubectl get namespace "$namespace" >/dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} Namespace '$namespace' exists"
         return 0
     else
@@ -29,15 +29,15 @@ check_namespace() {
 }
 
 check_pods() {
-    local namespace=$1
-    local label_selector=${2:-""}
+    namespace=$1
+    label_selector=${2:-""}
     
     if [ -z "$label_selector" ]; then
-        local pods=$(kubectl get pods -n "$namespace" --no-headers 2>/dev/null | wc -l)
-        local running=$(kubectl get pods -n "$namespace" --no-headers 2>/dev/null | grep -c "Running" || echo "0")
+        pods=$(kubectl get pods -n "$namespace" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        running=$(kubectl get pods -n "$namespace" --no-headers 2>/dev/null | grep -c "Running" || echo "0")
     else
-        local pods=$(kubectl get pods -n "$namespace" -l "$label_selector" --no-headers 2>/dev/null | wc -l)
-        local running=$(kubectl get pods -n "$namespace" -l "$label_selector" --no-headers 2>/dev/null | grep -c "Running" || echo "0")
+        pods=$(kubectl get pods -n "$namespace" -l "$label_selector" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        running=$(kubectl get pods -n "$namespace" -l "$label_selector" --no-headers 2>/dev/null | grep -c "Running" || echo "0")
     fi
     
     if [ "$pods" -eq 0 ]; then
@@ -54,12 +54,12 @@ check_pods() {
 }
 
 check_service() {
-    local namespace=$1
-    local service=$2
+    namespace=$1
+    service=$2
     
-    if kubectl get service "$service" -n "$namespace" &>/dev/null; then
-        local endpoints=$(kubectl get endpoints "$service" -n "$namespace" -o jsonpath='{.subsets[0].addresses[*].ip}' 2>/dev/null | wc -w)
-        if [ "$endpoints" -gt 0 ]; then
+    if kubectl get service "$service" -n "$namespace" >/dev/null 2>&1; then
+        endpoints=$(kubectl get endpoints "$service" -n "$namespace" -o jsonpath='{.subsets[0].addresses[*].ip}' 2>/dev/null | wc -w | tr -d ' ')
+        if [ "$endpoints" -gt 0 ] 2>/dev/null; then
             echo -e "${GREEN}✓${NC} Service '$service' in '$namespace' has endpoints"
             return 0
         else
@@ -73,10 +73,10 @@ check_service() {
 }
 
 check_ingress() {
-    local namespace=$1
+    namespace=$1
     
-    if kubectl get ingress -n "$namespace" &>/dev/null; then
-        local ingresses=$(kubectl get ingress -n "$namespace" --no-headers 2>/dev/null | wc -l)
+    if kubectl get ingress -n "$namespace" >/dev/null 2>&1; then
+        ingresses=$(kubectl get ingress -n "$namespace" --no-headers 2>/dev/null | wc -l | tr -d ' ')
         if [ "$ingresses" -gt 0 ]; then
             echo -e "${GREEN}✓${NC} Ingress resources found in '$namespace'"
             kubectl get ingress -n "$namespace"
@@ -149,7 +149,7 @@ if check_namespace "cattle-system"; then
     # Get Rancher URL
     echo ""
     echo "   Rancher Access:"
-    local rancher_host=$(kubectl get ingress -n cattle-system -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || echo "Not configured")
+    rancher_host=$(kubectl get ingress -n cattle-system -o jsonpath='{.items[0].spec.rules[0].host}' 2>/dev/null || echo "Not configured")
     if [ "$rancher_host" != "Not configured" ]; then
         echo "   - Hostname: $rancher_host"
         echo "   - HTTP:  http://$rancher_host"
@@ -162,8 +162,8 @@ fi
 # Check for HTTP access (non-HTTPS)
 echo ""
 echo "5. Checking HTTP/HTTPS Configuration..."
-if kubectl get ingress -n cattle-system &>/dev/null; then
-    local tls_enabled=$(kubectl get ingress -n cattle-system -o jsonpath='{.items[0].spec.tls[*].hosts[0]}' 2>/dev/null || echo "")
+if kubectl get ingress -n cattle-system >/dev/null 2>&1; then
+    tls_enabled=$(kubectl get ingress -n cattle-system -o jsonpath='{.items[0].spec.tls[*].hosts[0]}' 2>/dev/null || echo "")
     if [ -n "$tls_enabled" ]; then
         echo -e "${GREEN}✓${NC} TLS/HTTPS is configured"
     else
