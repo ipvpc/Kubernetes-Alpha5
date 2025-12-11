@@ -518,14 +518,19 @@
 
     - name: Wait for CNI pods to be ready
       shell: |
-        kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s || \
-        kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s || true
+        if [ "{{ cni_plugin | default('flannel') }}" == "calico" ]; then
+          KUBECONFIG=/etc/kubernetes/admin.conf kubectl wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s || \
+          kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s
+        else
+          KUBECONFIG=/etc/kubernetes/admin.conf kubectl wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s || \
+          kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s
+        fi
       register: cni_wait
       retries: 10
       delay: 10
       until: cni_wait.rc == 0
       changed_when: false
-      when: kubeconfig_stat.stat.exists
+      when: admin_conf_exists.stat.exists or kubeconfig_stat.stat.exists
 
     - name: Check kube-proxy status
       shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l k8s-app=kube-proxy -o jsonpath='{.items[*].status.phase}'

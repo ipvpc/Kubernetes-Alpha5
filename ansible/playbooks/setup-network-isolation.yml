@@ -1,0 +1,217 @@
+---
+# Network Isolation Setup: Configure Calico Network Policies
+# This playbook sets up network policies to isolate pods and configure service exposure
+# Usage: ansible-playbook playbooks/setup-network-isolation.yml -i inventory-devops.yml
+
+- name: Setup Network Isolation and Service Exposure
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  
+  vars:
+    default_deny_all: true
+    allow_dns: true
+    allow_kube_system: true
+  
+  tasks:
+    - name: Check if kubeconfig exists
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_exists
+
+    - name: Check if copied kubeconfig exists
+      stat:
+        path: /root/.kube/config
+      register: kubeconfig_exists
+
+    - name: Set kubeconfig path
+      set_fact:
+        kubeconfig: "{{ '/etc/kubernetes/admin.conf' if admin_conf_exists.stat.exists else '/root/.kube/config' }}"
+
+    - name: Check cluster connectivity
+      shell: kubectl --kubeconfig={{ kubeconfig }} cluster-info
+      register: cluster_info
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if cluster not accessible
+      fail:
+        msg: "Cannot access cluster. Please ensure cluster is initialized."
+      when: cluster_info.rc != 0
+
+    - name: Check if Calico is installed
+      shell: kubectl --kubeconfig={{ kubeconfig }} get daemonset -n kube-system calico-node 2>/dev/null | grep -q calico-node && echo "installed" || echo "not_installed"
+      register: calico_status
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if Calico not installed
+      fail:
+        msg: "Calico is not installed. Network policies require Calico. Please install Calico first."
+      when: calico_status.stdout != "installed"
+
+    - name: Create default deny-all network policy for all namespaces
+      shell: |
+        cat <<EOF | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: default-deny-all
+          namespace: default
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+          - Egress
+        EOF
+      when: default_deny_all | bool
+      register: default_policy
+      changed_when: default_policy.rc == 0
+
+    - name: Create allow-dns network policy
+      shell: |
+        cat <<EOF | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-dns
+          namespace: default
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Egress
+          egress:
+          - to:
+            - namespaceSelector:
+                matchLabels:
+                  name: kube-system
+            ports:
+            - protocol: UDP
+              port: 53
+            - protocol: TCP
+              port: 53
+        EOF
+      when: allow_dns | bool
+      register: dns_policy
+      changed_when: dns_policy.rc == 0
+
+    - name: Create allow-kube-system network policy
+      shell: |
+        cat <<EOF | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: allow-kube-system
+          namespace: default
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+          - Egress
+          ingress:
+          - from:
+            - namespaceSelector:
+                matchLabels:
+                  name: kube-system
+          egress:
+          - to:
+            - namespaceSelector:
+                matchLabels:
+                  name: kube-system
+        EOF
+      when: allow_kube_system | bool
+      register: kube_system_policy
+      changed_when: kube_system_policy.rc == 0
+
+    - name: Label kube-system namespace for network policies
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig }} label namespace kube-system name=kube-system --overwrite
+      register: label_ns
+      changed_when: label_ns.rc == 0
+      failed_when: false
+
+    - name: Create example network policy template
+      copy:
+        content: |
+          # Example Network Policy: Allow specific pods to communicate
+          # Usage: kubectl apply -f - < this-file.yaml
+          
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: allow-specific-communication
+            namespace: default
+          spec:
+            podSelector:
+              matchLabels:
+                app: my-app
+            policyTypes:
+            - Ingress
+            - Egress
+            ingress:
+            # Allow ingress from specific pods
+            - from:
+              - podSelector:
+                  matchLabels:
+                    app: allowed-client
+              ports:
+              - protocol: TCP
+                port: 8080
+            egress:
+            # Allow egress to specific destinations
+            - to:
+              - podSelector:
+                  matchLabels:
+                    app: database
+              ports:
+              - protocol: TCP
+                port: 5432
+            # Allow DNS
+            - to:
+              - namespaceSelector:
+                  matchLabels:
+                    name: kube-system
+              ports:
+              - protocol: UDP
+                port: 53
+              - protocol: TCP
+                port: 53
+        dest: /tmp/example-network-policy.yaml
+        mode: '0644'
+
+    - name: Display network policy status
+      shell: kubectl --kubeconfig={{ kubeconfig }} get networkpolicies -A
+      register: np_status
+      changed_when: false
+      failed_when: false
+
+    - name: Show network policies
+      debug:
+        msg: "{{ np_status.stdout_lines }}"
+      when: np_status is defined
+
+    - name: Display setup completion message
+      debug:
+        msg: |
+          ==========================================
+          Network Isolation Setup Complete!
+          ==========================================
+          Network Policies Created:
+          - default-deny-all: Blocks all traffic by default
+          - allow-dns: Allows DNS resolution
+          - allow-kube-system: Allows kube-system communication
+          
+          Example network policy template saved to:
+          /tmp/example-network-policy.yaml
+          
+          To create custom network policies:
+          1. Copy the example template
+          2. Modify for your needs
+          3. Apply: kubectl apply -f your-policy.yaml
+          
+          To expose services, use:
+          - NodePort: kubectl expose deployment <name> --type=NodePort
+          - LoadBalancer: kubectl expose deployment <name> --type=LoadBalancer
+          - Ingress: Set up an ingress controller (see setup-ingress.yml)
+          ==========================================
+

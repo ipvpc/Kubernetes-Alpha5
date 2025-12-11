@@ -1,0 +1,288 @@
+---
+# Ingress Controller Setup: Install Traefik or Nginx Ingress
+# This playbook installs an ingress controller for exposing services
+# Usage: ansible-playbook playbooks/setup-ingress.yml -i inventory-devops.yml
+
+- name: Setup Ingress Controller
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  
+  vars:
+    ingress_controller: "traefik"  # Options: traefik, nginx
+    traefik_version: "v2.10"
+    nginx_version: "v1.8.1"
+  
+  tasks:
+    - name: Check if kubeconfig exists
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_exists
+
+    - name: Check if copied kubeconfig exists
+      stat:
+        path: /root/.kube/config
+      register: kubeconfig_exists
+
+    - name: Set kubeconfig path
+      set_fact:
+        kubeconfig: "{{ '/etc/kubernetes/admin.conf' if admin_conf_exists.stat.exists else '/root/.kube/config' }}"
+
+    - name: Check cluster connectivity
+      shell: kubectl --kubeconfig={{ kubeconfig }} cluster-info
+      register: cluster_info
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if cluster not accessible
+      fail:
+        msg: "Cannot access cluster. Please ensure cluster is initialized."
+      when: cluster_info.rc != 0
+
+    - name: Install Traefik Ingress Controller
+      block:
+        - name: Create Traefik namespace
+          shell: kubectl --kubeconfig={{ kubeconfig }} create namespace traefik --dry-run=client -o yaml | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+          register: traefik_ns
+          changed_when: traefik_ns.rc == 0
+          failed_when: false
+
+        - name: Install Traefik via Helm or manifest
+          shell: |
+            # Install Traefik using official manifest
+            kubectl --kubeconfig={{ kubeconfig }} apply -f https://raw.githubusercontent.com/traefik/traefik-helm-chart/master/traefik/traefik.yaml || \
+            kubectl --kubeconfig={{ kubeconfig }} apply -f https://raw.githubusercontent.com/traefik/traefik/v2.10/examples/k8s/traefik-deployment.yaml
+          register: traefik_install
+          retries: 3
+          delay: 10
+          until: traefik_install.rc == 0
+          ignore_errors: yes
+
+        - name: Install Traefik using simple manifest
+          shell: |
+            cat <<EOF | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: traefik
+            ---
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: traefik-ingress-controller
+              namespace: traefik
+            ---
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: ClusterRole
+            metadata:
+              name: traefik-ingress-controller
+            rules:
+            - apiGroups:
+              - ""
+              resources:
+              - services
+              - endpoints
+              - secrets
+              verbs:
+              - get
+              - list
+              - watch
+            - apiGroups:
+              - networking.k8s.io
+              resources:
+              - ingresses
+              verbs:
+              - get
+              - list
+              - watch
+            - apiGroups:
+              - networking.k8s.io
+              resources:
+              - ingresses/status
+              verbs:
+              - update
+            ---
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: ClusterRoleBinding
+            metadata:
+              name: traefik-ingress-controller
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: ClusterRole
+              name: traefik-ingress-controller
+            subjects:
+            - kind: ServiceAccount
+              name: traefik-ingress-controller
+              namespace: traefik
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: traefik
+              namespace: traefik
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: traefik
+              template:
+                metadata:
+                  labels:
+                    app: traefik
+                spec:
+                  serviceAccountName: traefik-ingress-controller
+                  containers:
+                  - name: traefik
+                    image: traefik:v2.10
+                    args:
+                    - --api.insecure=true
+                    - --providers.kubernetesingress=true
+                    - --entrypoints.web.address=:80
+                    - --entrypoints.websecure.address=:443
+                    ports:
+                    - name: web
+                      containerPort: 80
+                    - name: websecure
+                      containerPort: 443
+                    - name: admin
+                      containerPort: 8080
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: traefik
+              namespace: traefik
+            spec:
+              type: NodePort
+              selector:
+                app: traefik
+              ports:
+              - name: web
+                port: 80
+                targetPort: 80
+                nodePort: 30080
+              - name: websecure
+                port: 443
+                targetPort: 443
+                nodePort: 30443
+              - name: admin
+                port: 8080
+                targetPort: 8080
+                nodePort: 30880
+            EOF
+          register: traefik_simple_install
+          when: traefik_install.rc != 0 | default(true)
+
+        - name: Wait for Traefik to be ready
+          shell: kubectl --kubeconfig={{ kubeconfig }} wait --for=condition=ready pod -l app=traefik -n traefik --timeout=300s
+          register: traefik_wait
+          retries: 10
+          delay: 10
+          until: traefik_wait.rc == 0
+          changed_when: false
+          ignore_errors: yes
+
+      when: ingress_controller == "traefik"
+
+    - name: Install Nginx Ingress Controller
+      block:
+        - name: Install Nginx Ingress
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig }} apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-{{ nginx_version }}/deploy/static/provider/baremetal/deploy.yaml
+          register: nginx_install
+          retries: 3
+          delay: 10
+          until: nginx_install.rc == 0
+
+        - name: Wait for Nginx Ingress to be ready
+          shell: kubectl --kubeconfig={{ kubeconfig }} wait --for=condition=ready pod -l app.kubernetes.io/component=controller -n ingress-nginx --timeout=300s
+          register: nginx_wait
+          retries: 10
+          delay: 10
+          until: nginx_wait.rc == 0
+          changed_when: false
+          ignore_errors: yes
+
+      when: ingress_controller == "nginx"
+
+    - name: Get ingress controller service
+      shell: |
+        if [ "{{ ingress_controller }}" == "traefik" ]; then
+          kubectl --kubeconfig={{ kubeconfig }} get svc -n traefik traefik -o jsonpath='{.spec.ports[*].nodePort}'
+        else
+          kubectl --kubeconfig={{ kubeconfig }} get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[*].nodePort}'
+        fi
+      register: ingress_ports
+      changed_when: false
+      failed_when: false
+
+    - name: Display ingress controller status
+      shell: |
+        if [ "{{ ingress_controller }}" == "traefik" ]; then
+          kubectl --kubeconfig={{ kubeconfig }} get pods,svc -n traefik
+        else
+          kubectl --kubeconfig={{ kubeconfig }} get pods,svc -n ingress-nginx
+        fi
+      register: ingress_status
+      changed_when: false
+      failed_when: false
+
+    - name: Show ingress controller status
+      debug:
+        msg: "{{ ingress_status.stdout_lines }}"
+      when: ingress_status is defined
+
+    - name: Create example ingress manifest
+      copy:
+        content: |
+          # Example Ingress Resource
+          # Usage: kubectl apply -f - < this-file.yaml
+          
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: example-ingress
+            namespace: default
+            annotations:
+              # For Traefik
+              traefik.ingress.kubernetes.io/rule-type: PathPrefix
+              # For Nginx
+              # nginx.ingress.kubernetes.io/rewrite-target: /
+          spec:
+            ingressClassName: nginx  # or traefik depending on controller
+            rules:
+            - host: example.local
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: your-service
+                      port:
+                        number: 80
+        dest: /tmp/example-ingress.yaml
+        mode: '0644'
+
+    - name: Display setup completion message
+      debug:
+        msg: |
+          ==========================================
+          Ingress Controller Setup Complete!
+          ==========================================
+          Controller: {{ ingress_controller }}
+          NodePorts: {{ ingress_ports.stdout | default('Check manually') }}
+          
+          Access Ingress:
+          - HTTP: http://<node-ip>:{{ '30080' if ingress_controller == 'traefik' else 'Check service' }}
+          - HTTPS: https://<node-ip>:{{ '30443' if ingress_controller == 'traefik' else 'Check service' }}
+          
+          Example ingress manifest saved to:
+          /tmp/example-ingress.yaml
+          
+          To expose a service:
+          1. Create a service: kubectl expose deployment <name> --port=80
+          2. Create an ingress: kubectl apply -f example-ingress.yaml
+          3. Access via: http://<node-ip>:<nodeport> or via ingress hostname
+          ==========================================
+

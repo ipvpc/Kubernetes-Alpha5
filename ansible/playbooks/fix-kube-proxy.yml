@@ -35,6 +35,19 @@
       retries: 3
       delay: 10
 
+    - name: Install CNI plugin if not present (Calico)
+      shell: |
+        curl -s https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml | \
+        sed 's|# - name: CALICO_IPV4POOL_CIDR|            - name: CALICO_IPV4POOL_CIDR|' | \
+        sed 's|#   value: "192.168.0.0/16"|              value: "{{ pod_network_cidr | default(''10.245.0.0/16'') }}"|' | \
+        kubectl --kubeconfig=/root/.kube/config apply -f -
+      when: 
+        - "'CNI not found' in cni_status.stdout or cni_status.stdout == ''"
+        - cni_plugin | default('flannel') == "calico"
+      register: cni_install_calico
+      retries: 3
+      delay: 10
+
     - name: Wait for CNI to be ready
       shell: |
         kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s || \

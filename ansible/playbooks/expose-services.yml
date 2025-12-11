@@ -1,0 +1,198 @@
+---
+# Service Exposure Examples: NodePort, LoadBalancer, and Ingress
+# This playbook demonstrates how to expose services
+# Usage: ansible-playbook playbooks/expose-services.yml -i inventory-devops.yml
+
+- name: Service Exposure Examples
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Check if kubeconfig exists
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: admin_conf_exists
+
+    - name: Set kubeconfig path
+      set_fact:
+        kubeconfig: "{{ '/etc/kubernetes/admin.conf' if admin_conf_exists.stat.exists else '/root/.kube/config' }}"
+
+    - name: Create example service manifests
+      copy:
+        content: |
+          # Example 1: NodePort Service
+          # Exposes service on a high port (30000-32767) on all nodes
+          # Access: http://<any-node-ip>:<nodeport>
+          
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: example-nodeport
+            namespace: default
+          spec:
+            type: NodePort
+            selector:
+              app: my-app
+            ports:
+            - port: 80
+              targetPort: 8080
+              nodePort: 30001  # Optional: specify port, or let Kubernetes assign
+              protocol: TCP
+            ---
+            # Example 2: LoadBalancer Service
+            # Requires a load balancer (cloud provider or MetalLB)
+            # Access: http://<loadbalancer-ip>
+            
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: example-loadbalancer
+              namespace: default
+            spec:
+              type: LoadBalancer
+              selector:
+                app: my-app
+              ports:
+              - port: 80
+                targetPort: 8080
+                protocol: TCP
+            ---
+            # Example 3: ClusterIP Service (internal only)
+            # Only accessible within the cluster
+            
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: example-clusterip
+              namespace: default
+            spec:
+              type: ClusterIP
+              selector:
+                app: my-app
+              ports:
+              - port: 80
+                targetPort: 8080
+                protocol: TCP
+        dest: /tmp/example-services.yaml
+        mode: '0644'
+
+    - name: Create example ingress manifest
+      copy:
+        content: |
+          # Example Ingress Resource
+          # Routes external traffic to services based on hostname/path
+          
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: example-ingress
+            namespace: default
+            annotations:
+              # Traefik annotations
+              traefik.ingress.kubernetes.io/rule-type: PathPrefix
+              # Nginx annotations (uncomment if using Nginx)
+              # nginx.ingress.kubernetes.io/rewrite-target: /
+          spec:
+            # ingressClassName: traefik  # For Traefik
+            ingressClassName: nginx      # For Nginx
+            rules:
+            - host: app.example.com
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: example-clusterip
+                      port:
+                        number: 80
+            - host: api.example.com
+              http:
+                paths:
+                - path: /api
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: api-service
+                      port:
+                        number: 8080
+        dest: /tmp/example-ingress.yaml
+        mode: '0644'
+
+    - name: Create network policy for exposed service
+      copy:
+        content: |
+          # Network Policy: Allow external access to exposed service
+          # This allows traffic from outside the cluster to reach your service
+          
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: allow-external-access
+            namespace: default
+          spec:
+            podSelector:
+              matchLabels:
+                app: my-app
+            policyTypes:
+            - Ingress
+            ingress:
+            # Allow traffic from ingress controller
+            - from:
+              - namespaceSelector:
+                  matchLabels:
+                    name: traefik
+              - namespaceSelector:
+                  matchLabels:
+                    name: ingress-nginx
+            # Allow traffic from NodePort range (if using NodePort)
+            - from: []
+              ports:
+              - protocol: TCP
+                port: 8080
+        dest: /tmp/allow-external-access-policy.yaml
+        mode: '0644'
+
+    - name: Display service exposure guide
+      debug:
+        msg: |
+          ==========================================
+          Service Exposure Guide
+          ==========================================
+          
+          Example manifests created:
+          - /tmp/example-services.yaml (NodePort, LoadBalancer, ClusterIP)
+          - /tmp/example-ingress.yaml (Ingress resource)
+          - /tmp/allow-external-access-policy.yaml (Network policy)
+          
+          Quick Commands:
+          
+          1. Expose via NodePort:
+             kubectl expose deployment <name> --type=NodePort --port=80
+             
+          2. Expose via LoadBalancer:
+             kubectl expose deployment <name> --type=LoadBalancer --port=80
+             
+          3. Create Ingress:
+             kubectl apply -f /tmp/example-ingress.yaml
+             
+          4. Check service:
+             kubectl get svc
+             kubectl get ingress
+             
+          5. Get NodePort:
+             kubectl get svc <service-name> -o jsonpath='{.spec.ports[0].nodePort}'
+             
+          6. Access service:
+             - NodePort: http://<node-ip>:<nodeport>
+             - LoadBalancer: http://<loadbalancer-ip>
+             - Ingress: http://<ingress-hostname> or http://<node-ip>:<ingress-nodeport>
+             
+          Network Policies:
+          - Pods are isolated by default (if default-deny-all is applied)
+          - Use allow-external-access-policy.yaml to allow external traffic
+          - Modify network policies to control access
+          
+          ==========================================
+

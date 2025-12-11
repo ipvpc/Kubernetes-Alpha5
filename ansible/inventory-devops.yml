@@ -15,6 +15,9 @@ all:
     # Installation Method
     install_method: "kubeadm"  # Options: kubeadm, k3s, rke2
     
+    # CNI Plugin
+    cni_plugin: "calico"  # Options: flannel, calico, weave
+    
   children:
     # Control Plane Nodes (Masters)
     control_plane:
