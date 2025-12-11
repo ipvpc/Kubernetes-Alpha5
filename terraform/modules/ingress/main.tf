@@ -26,25 +26,29 @@ resource "helm_release" "traefik" {
       service = {
         type = var.ingress_service_type
       }
-      # Deployment configuration with security context for privileged ports
-      deployment = {
-        podSecurityContext = {
-          fsGroup = 0
+      # Use hostNetwork to allow binding to privileged ports
+      hostNetwork = true
+      # Ports configuration
+      ports = {
+        web = {
+          port       = 80
+          redirectTo = "websecure"
         }
-        securityContext = {
-          capabilities = {
-            drop = ["ALL"]
-            add  = ["NET_BIND_SERVICE"]
-          }
-          readOnlyRootFilesystem = false
-          runAsGroup             = 0
-          runAsNonRoot           = false
-          runAsUser              = 0
+        websecure = {
+          port = 443
         }
       }
-      # Alternative: Use hostNetwork if security context doesn't work
-      # This allows binding to privileged ports but reduces network isolation
-      # hostNetwork = false  # Set to true if securityContext approach fails
+      # Security context for privileged ports
+      securityContext = {
+        capabilities = {
+          drop = ["ALL"]
+          add  = ["NET_BIND_SERVICE"]
+        }
+        readOnlyRootFilesystem = true
+        runAsGroup             = 0
+        runAsNonRoot           = false
+        runAsUser              = 0
+      }
       # Enable Traefik dashboard
       dashboard = {
         enabled = true
@@ -64,6 +68,8 @@ resource "helm_release" "traefik" {
         "--accesslog=true",
         "--entrypoints.web.address=:80",
         "--entrypoints.websecure.address=:443",
+        "--entrypoints.web.http.redirections.entrypoint.to=websecure",
+        "--entrypoints.web.http.redirections.entrypoint.scheme=https",
         "--providers.kubernetesingress=true",
         "--providers.kubernetescrd=true"
       ]
