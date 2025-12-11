@@ -68,10 +68,15 @@ module "monitoring" {
 }
 
 # Deploy Rancher (optional)
+# Note: Depends on ingress controller to avoid webhook certificate issues
 module "rancher" {
   count = var.enable_rancher ? 1 : 0
 
   source = "./modules/rancher"
+  
+  # Ensure ingress controller is deployed and ready before Rancher
+  # This prevents webhook certificate validation errors
+  depends_on = [module.ingress]
 
   environment              = var.environment
   rancher_hostname         = var.rancher_hostname

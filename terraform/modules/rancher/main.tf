@@ -102,12 +102,16 @@ resource "null_resource" "verify_cert_manager_crds" {
       while [ $attempt -lt $max_attempts ]; do
         # kubectl will use KUBECONFIG env var or default ~/.kube/config
         if kubectl get crd clusterissuers.cert-manager.io >/dev/null 2>&1; then
-          echo "✓ cert-manager CRDs are available!"
-          # Additional check: verify the CRD is fully registered
+          # Additional check: verify the CRD is fully registered with API server
           if kubectl api-resources | grep -q "clusterissuers.cert-manager.io"; then
+            echo "✓ cert-manager CRDs are available!"
             echo "✓ ClusterIssuer CRD is fully registered with API server"
             exit 0
+          else
+            echo "CRD exists but not yet registered with API server, waiting..."
           fi
+        else
+          echo "CRD not found yet, waiting..."
         fi
         attempt=$((attempt + 1))
         echo "Attempt $attempt/$max_attempts: CRDs not ready yet, waiting 5 seconds..."
@@ -264,6 +268,7 @@ resource "helm_release" "rancher" {
   }
 
   # Wait for cert-manager to be ready
+  # Ingress controller is deployed before this module (via depends_on in main.tf)
   depends_on = [
     helm_release.cert_manager,
     kubernetes_namespace.rancher

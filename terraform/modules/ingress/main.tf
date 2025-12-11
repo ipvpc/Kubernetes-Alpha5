@@ -27,9 +27,18 @@ resource "helm_release" "nginx_ingress" {
         service = {
           type = var.ingress_service_type
         }
+        # Disable admission webhook to avoid certificate issues during deployment
+        # The webhook can cause issues if certificates aren't ready yet
+        admissionWebhooks = {
+          enabled = false
+        }
       }
     })
   ]
+  
+  # Wait for ingress controller to be fully deployed
+  wait = true
+  timeout = 600
 
   depends_on = [kubernetes_namespace.ingress]
 }
