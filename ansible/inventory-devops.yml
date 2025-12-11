@@ -21,7 +21,7 @@ all:
       hosts:
         master1:
           ansible_host: 192.168.10.73
-          node_name: devops1
+          node_name: devops1-cluster
       vars:
         is_control_plane: true
     
@@ -30,10 +30,10 @@ all:
       hosts:
         worker1:
           ansible_host: 192.168.10.74
-          node_name: devops2
+          node_name: devops2-cluster
         worker2:
           ansible_host: 192.168.10.75
-          node_name: devops3
+          node_name: devops3-cluster
       vars:
         is_control_plane: false
     
