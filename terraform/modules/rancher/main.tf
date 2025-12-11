@@ -201,7 +201,7 @@ resource "helm_release" "rancher" {
   count = var.enable_rancher ? 1 : 0
 
   name       = "rancher"
-  repository = "https://releases.rancher.com/server-charts/latest"
+  repository = "https://releases.rancher.com/server-charts/stable"
   chart      = "rancher"
   version    = var.rancher_chart_version
   namespace  = kubernetes_namespace.rancher.metadata[0].name
