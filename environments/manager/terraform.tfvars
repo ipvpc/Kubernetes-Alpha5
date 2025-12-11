@@ -20,7 +20,7 @@ rancher_ingress_class     = "traefik"
 
 # Let's Encrypt Configuration
 # Set to false if you want to use HTTP only or self-signed certs (faster setup)
-enable_letsencrypt       = false
+enable_letsencrypt       = true
 letsencrypt_email        = "nfernandes@alpha5cloud.com"     # Change to your email
 letsencrypt_issuer_name  = "letsencrypt-prod"
 

@@ -79,8 +79,12 @@ resource "helm_release" "traefik" {
   ]
   
   # Wait for ingress controller to be fully deployed
+  # Note: If Traefik pods are running but Helm is still waiting,
+  # it might be waiting for readiness probes. You can set wait = false
+  # to proceed without waiting, but this is not recommended.
   wait = true
-  timeout = 600
+  wait_for_jobs = false
+  timeout = 600  # 10 minutes - Traefik with hostNetwork may take longer
   
   # Allow Helm to skip hooks during uninstall if needed
   skip_crds = false
