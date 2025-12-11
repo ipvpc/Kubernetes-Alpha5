@@ -415,8 +415,9 @@
         generated_join_cmd: "{{ generated_join_command.stdout | default('') | trim }}"
       when: 
         - generated_join_command is defined
-        - generated_join_command.rc == 0
-        - "'TOKEN_CREATE_FAILED' not in generated_join_command.stdout"
+        - (generated_join_command.rc | default(999)) == 0
+        - (generated_join_command.stdout | default('')) != ''
+        - "'TOKEN_CREATE_FAILED' not in (generated_join_command.stdout | default('') | string)"
 
     - name: Get CA cert hash for join command
       shell: |
@@ -440,22 +441,31 @@
 
     - name: Build join command manually if needed
       set_fact:
-        manual_join_command: "kubeadm join {{ master_ip }}:6443 --token {{ bootstrap_token.stdout }} --discovery-token-ca-cert-hash sha256:{{ ca_cert_hash.stdout }} --cri-socket={{ cri_socket }}"
+        manual_join_command: "kubeadm join {{ master_ip }}:6443 --token {{ bootstrap_token.stdout | default('') }} --discovery-token-ca-cert-hash sha256:{{ ca_cert_hash.stdout | default('') }} --cri-socket={{ cri_socket }}"
       when: 
         - admin_conf_exists.stat.exists
         - all_join_commands | default([]) | length == 0
+        - generated_join_cmd is not defined or generated_join_cmd == ""
+        - bootstrap_token is defined
+        - bootstrap_token.stdout is defined
         - bootstrap_token.stdout != "TOKEN_NOT_FOUND"
+        - ca_cert_hash is defined
+        - ca_cert_hash.stdout is defined
         - ca_cert_hash.stdout != "HASH_FAILED"
 
     - name: Save kubeadm join command for control plane
       set_fact:
         kubeadm_join_command: "{{ (all_join_commands[0] | default(generated_join_cmd | default(manual_join_command | default('')))) | string | trim }}"
-      when: admin_conf_exists.stat.exists
+      when: 
+        - admin_conf_exists.stat.exists
+        - all_join_commands is defined
 
     - name: Save kubeadm join command for workers
       set_fact:
         kubeadm_join_command_worker: "{{ (all_join_commands[-1] | default(all_join_commands[0] | default(generated_join_cmd | default(manual_join_command | default(''))))) | string | trim }}"
-      when: admin_conf_exists.stat.exists
+      when: 
+        - admin_conf_exists.stat.exists
+        - all_join_commands is defined
 
     - name: Display final join commands
       debug:
