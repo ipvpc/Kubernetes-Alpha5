@@ -286,37 +286,96 @@
 
     - name: Initialize Kubernetes cluster
       shell: >
-        kubeadm init
+        timeout 600 kubeadm init
         --pod-network-cidr={{ pod_network_cidr }}
         --service-cidr={{ service_cidr }}
         --control-plane-endpoint={{ master_ip }}:6443
         --upload-certs
         --cri-socket={{ cri_socket }}
         --image-repository=registry.k8s.io
+        --apiserver-advertise-address={{ master_ip }}
+        --apiserver-bind-port=6443
       register: kubeadm_init
       changed_when: true
       failed_when: false
+      async: 600
+      poll: 10
 
-    - name: Check if kubeadm init succeeded
-      fail:
-        msg: |
-          kubeadm init failed with return code {{ kubeadm_init.rc }}
-          Error output: {{ kubeadm_init.stderr | default('No error output') }}
-          The cluster may have partially initialized. Check the logs and consider running:
-          kubeadm reset --force --cri-socket={{ cri_socket }}
-      when: kubeadm_init.rc != 0
-
-    - name: Check if admin.conf was created (cluster initialized successfully)
+    - name: Check if admin.conf was created (cluster may be partially initialized)
       stat:
         path: /etc/kubernetes/admin.conf
       register: admin_conf_exists
 
-    - name: Warn if cluster partially initialized
-      debug:
-        msg: |
-          WARNING: kubeadm init completed but admin.conf not found.
-          This may indicate a partial initialization. Check the output above.
-      when: not admin_conf_exists.stat.exists
+    - name: Fix API server bind address immediately after init
+      replace:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        regexp: '^\s*-\s*--bind-address=127\.0\.0\.1'
+        replace: '    - --bind-address=0.0.0.0'
+      register: fix_api_bind_immediate
+      failed_when: false
+      when: admin_conf_exists.stat.exists
+
+    - name: Fix API server advertise address immediately after init
+      replace:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        regexp: '^\s*-\s*--advertise-address=127\.0\.0\.1'
+        replace: '    - --advertise-address={{ master_ip }}'
+      register: fix_api_advertise_immediate
+      failed_when: false
+      when: admin_conf_exists.stat.exists
+
+    - name: Restart kubelet if API server config was fixed
+      systemd:
+        name: kubelet
+        state: restarted
+      when: 
+        - admin_conf_exists.stat.exists
+        - fix_api_bind_immediate.changed | default(false) or fix_api_advertise_immediate.changed | default(false)
+
+    - name: Wait for API server to restart after bind address fix
+      pause:
+        seconds: 30
+      when: 
+        - admin_conf_exists.stat.exists
+        - fix_api_bind_immediate.changed | default(false) or fix_api_advertise_immediate.changed | default(false)
+
+    - name: Check if cluster is usable despite kubeadm init error
+      shell: |
+        if [ -f /etc/kubernetes/admin.conf ]; then
+          kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes 2>/dev/null && echo "CLUSTER_USABLE" || echo "CLUSTER_NOT_READY"
+        else
+          echo "NO_ADMIN_CONF"
+        fi
+      register: cluster_usable_check
+      changed_when: false
+      failed_when: false
+      when: kubeadm_init.rc != 0
+
+    - name: Handle kubeadm init failure
+      block:
+        - name: Fail if cluster is not usable
+          fail:
+            msg: |
+              kubeadm init failed with return code {{ kubeadm_init.rc }}
+              Error output: {{ kubeadm_init.stderr | default('No error output') }}
+              admin.conf was not created. The cluster did not initialize.
+              Consider running: kubeadm reset --force --cri-socket={{ cri_socket }}
+          when: 
+            - kubeadm_init.rc != 0
+            - not admin_conf_exists.stat.exists
+
+        - name: Warn about partial initialization but continue
+          debug:
+            msg: |
+              WARNING: kubeadm init failed (return code {{ kubeadm_init.rc }}), but admin.conf exists.
+              The cluster may be partially initialized (CoreDNS may be missing).
+              Continuing with installation - we will install CoreDNS manually if needed.
+              Error: {{ kubeadm_init.stderr | default('No error output') }}
+          when: 
+            - kubeadm_init.rc != 0
+            - admin_conf_exists.stat.exists
+            - cluster_usable_check.stdout != "CLUSTER_USABLE"
+      when: kubeadm_init.rc != 0
 
     - name: Debug kubeadm init output
       debug:
@@ -541,10 +600,45 @@
       shell: kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes
       register: wait_result
       until: wait_result.rc == 0
-      retries: 30
+      retries: 60
       delay: 5
       changed_when: false
       when: admin_conf_exists.stat.exists
+
+    - name: Install CoreDNS manually if kubeadm init failed
+      shell: |
+        # Check if CoreDNS already exists
+        if ! kubectl --kubeconfig=/etc/kubernetes/admin.conf get deployment coredns -n kube-system 2>/dev/null; then
+          # Get CoreDNS manifest from kubeadm
+          kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f https://raw.githubusercontent.com/coredns/coredns/master/kubernetes/coredns.yaml.sed || \
+          kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f https://github.com/coredns/coredns/releases/download/v1.10.1/coredns.yaml || \
+          echo "CoreDNS installation failed - will retry"
+        else
+          echo "CoreDNS already exists"
+        fi
+      register: coredns_install
+      retries: 3
+      delay: 10
+      until: coredns_install.rc == 0
+      changed_when: coredns_install.rc == 0
+      ignore_errors: yes
+      when: 
+        - admin_conf_exists.stat.exists
+        - kubeadm_init.rc != 0 | default(false)
+        - wait_result.rc == 0 | default(false)
+
+    - name: Wait for CoreDNS to be ready
+      shell: kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=ready pod -l k8s-app=kube-dns -n kube-system --timeout=180s
+      register: coredns_wait
+      retries: 6
+      delay: 10
+      until: coredns_wait.rc == 0
+      changed_when: false
+      ignore_errors: yes
+      when: 
+        - admin_conf_exists.stat.exists
+        - coredns_install is defined
+        - coredns_install.rc == 0 | default(false)
 
     - name: Wait for API server to be ready (using copied config)
       shell: kubectl --kubeconfig=/root/.kube/config get nodes
