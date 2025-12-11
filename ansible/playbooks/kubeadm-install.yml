@@ -401,7 +401,7 @@
       register: port_check
       changed_when: false
       failed_when: false
-      when: kubeconfig_stat.stat.exists
+      when: admin_conf_exists.stat.exists
 
     - name: Display port check results
       debug:
@@ -414,49 +414,78 @@
       wait_for:
         path: /etc/kubernetes/manifests/kube-apiserver.yaml
         timeout: 60
-      when: kubeconfig_stat.stat.exists
+      when: admin_conf_exists.stat.exists
 
     - name: Check API server manifest bind address
       shell: grep -E '^\s*-\s*--bind-address' /etc/kubernetes/manifests/kube-apiserver.yaml || echo "bind-address not found"
       register: api_bind_address
       changed_when: false
       failed_when: false
-      when: kubeconfig_stat.stat.exists
+      when: admin_conf_exists.stat.exists
 
     - name: Display API server bind address
       debug:
         msg: "API server bind address: {{ api_bind_address.stdout }}"
 
-    - name: Wait for API server pod to be running
+    - name: Wait for API server static pod to be created by kubelet
       shell: |
         for i in {1..60}; do
-          if kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l component=kube-apiserver --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -q kube-apiserver; then
+          if [ -f /etc/kubernetes/manifests/kube-apiserver.yaml ]; then
+            # Check if kubelet has created the pod directory
+            if [ -d /var/lib/kubelet/pods ] && [ -n "$(find /var/lib/kubelet/pods -name '*kube-apiserver*' -type d 2>/dev/null | head -1)" ]; then
+              exit 0
+            fi
+          fi
+          sleep 2
+        done
+        exit 1
+      register: api_server_pod_wait
+      retries: 1
+      delay: 0
+      until: api_server_pod_wait.rc == 0
+      changed_when: false
+      ignore_errors: yes
+      when: admin_conf_exists.stat.exists
+
+    - name: Wait for API server to respond (using admin.conf)
+      shell: |
+        for i in {1..60}; do
+          if kubectl --kubeconfig=/etc/kubernetes/admin.conf get --raw=/healthz 2>/dev/null | grep -q "ok"; then
             exit 0
           fi
           sleep 5
         done
         exit 1
-      register: api_server_wait
+      register: api_server_health_wait
       retries: 1
       delay: 0
-      until: api_server_wait.rc == 0
+      until: api_server_health_wait.rc == 0
       changed_when: false
       ignore_errors: yes
-      when: kubeconfig_stat.stat.exists
+      when: admin_conf_exists.stat.exists
 
-    - name: Check API server pod status
-      shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l component=kube-apiserver -o wide
+    - name: Check API server pod status (using admin.conf)
+      shell: kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l component=kube-apiserver -o wide 2>/dev/null || echo "API server check failed"
       register: api_server_status
       changed_when: false
       failed_when: false
-      when: kubeconfig_stat.stat.exists
+      when: admin_conf_exists.stat.exists
 
     - name: Display API server status
       debug:
         msg: "{{ api_server_status.stdout_lines }}"
       when: 
-        - kubeconfig_stat.stat.exists
+        - admin_conf_exists.stat.exists
         - api_server_status is defined
+
+    - name: Check API server pod status (using copied config as fallback)
+      shell: kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l component=kube-apiserver -o wide 2>/dev/null || echo "API server check failed"
+      register: api_server_status2
+      changed_when: false
+      failed_when: false
+      when: 
+        - kubeconfig_stat.stat.exists
+        - not admin_conf_exists.stat.exists
 
     - name: Wait for API server to be ready (using admin.conf directly)
       shell: kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes
