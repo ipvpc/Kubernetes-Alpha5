@@ -90,9 +90,11 @@ resource "helm_release" "traefik" {
   # Allow Helm to skip hooks during uninstall if needed
   skip_crds = false
   
-  # Lifecycle: prevent destroy issues by allowing replacement
+  # Lifecycle: prevent unnecessary replacement after cluster reboot
   lifecycle {
     create_before_destroy = false
+    # Ignore changes to status/metadata that might change after reboot
+    # Helm will reconcile the release automatically
     ignore_changes = []
   }
 

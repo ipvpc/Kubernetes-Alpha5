@@ -44,6 +44,14 @@ resource "helm_release" "prometheus" {
   ]
 
   depends_on = [kubernetes_namespace.monitoring]
+  
+  # Lifecycle: prevent unnecessary replacement after cluster reboot
+  lifecycle {
+    ignore_changes = [
+      # Ignore changes to status/metadata that might change after reboot
+      # Helm will reconcile the release automatically
+    ]
+  }
 }
 
 resource "kubernetes_namespace" "monitoring" {

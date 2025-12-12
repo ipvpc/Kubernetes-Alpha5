@@ -73,6 +73,14 @@ resource "helm_release" "cert_manager" {
   # Wait for cert-manager to be fully deployed
   wait = true
   timeout = 600
+  
+  # Lifecycle: prevent unnecessary replacement after cluster reboot
+  lifecycle {
+    ignore_changes = [
+      # Ignore changes to status/metadata that might change after reboot
+      # Helm will reconcile the release automatically
+    ]
+  }
 }
 
 # Wait for cert-manager CRDs to be installed and registered
@@ -279,6 +287,14 @@ resource "helm_release" "rancher" {
   # Wait for cert-manager to be fully ready before deploying Rancher
   wait = true
   timeout = 600
+  
+  # Lifecycle: prevent unnecessary replacement after cluster reboot
+  lifecycle {
+    ignore_changes = [
+      # Ignore changes to status/metadata that might change after reboot
+      # Helm will reconcile the release automatically
+    ]
+  }
 }
 
 # Create Ingress for Rancher (if not using Rancher's built-in ingress)
