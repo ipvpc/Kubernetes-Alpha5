@@ -834,6 +834,48 @@
         - cni_plugin == "flannel"
         - admin_conf_exists.stat.exists or kubeconfig_stat.stat.exists
 
+    - name: Remove Flannel if it exists (when using Calico)
+      block:
+        - name: Check if Flannel is installed
+          shell: |
+            KUBECONFIG=/etc/kubernetes/admin.conf kubectl get daemonset -n kube-flannel kube-flannel-ds 2>/dev/null || \
+            kubectl --kubeconfig=/root/.kube/config get daemonset -n kube-flannel kube-flannel-ds 2>/dev/null || \
+            echo "Flannel not found"
+          register: flannel_check
+          changed_when: false
+          failed_when: false
+          when: admin_conf_exists.stat.exists or kubeconfig_stat.stat.exists
+
+        - name: Delete Flannel if installed
+          shell: |
+            KUBECONFIG=/etc/kubernetes/admin.conf kubectl delete -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml --ignore-not-found || \
+            kubectl --kubeconfig=/root/.kube/config delete -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml --ignore-not-found || true
+            KUBECONFIG=/etc/kubernetes/admin.conf kubectl delete namespace kube-flannel --ignore-not-found --force --grace-period=0 || \
+            kubectl --kubeconfig=/root/.kube/config delete namespace kube-flannel --ignore-not-found --force --grace-period=0 || true
+          register: flannel_delete
+          changed_when: flannel_delete.rc == 0
+          ignore_errors: yes
+          when:
+            - admin_conf_exists.stat.exists or kubeconfig_stat.stat.exists
+            - "'not found' not in flannel_check.stdout | default('')"
+
+        - name: Wait for Flannel pods to terminate
+          shell: |
+            KUBECONFIG=/etc/kubernetes/admin.conf kubectl get pods -n kube-flannel --field-selector=status.phase!=Succeeded,status.phase!=Failed --no-headers 2>/dev/null | wc -l || \
+            kubectl --kubeconfig=/root/.kube/config get pods -n kube-flannel --field-selector=status.phase!=Succeeded,status.phase!=Failed --no-headers 2>/dev/null | wc -l || \
+            echo "0"
+          register: flannel_pods_count
+          until: flannel_pods_count.stdout | int == 0
+          retries: 10
+          delay: 5
+          changed_when: false
+          when:
+            - admin_conf_exists.stat.exists or kubeconfig_stat.stat.exists
+            - "'not found' not in flannel_check.stdout | default('')"
+      when:
+        - cni_plugin == "calico"
+        - admin_conf_exists.stat.exists or kubeconfig_stat.stat.exists
+
     - name: Install CNI plugin (Calico)
       shell: |
         KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml || \
