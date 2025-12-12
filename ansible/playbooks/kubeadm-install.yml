@@ -935,6 +935,14 @@
       when: join_command != ""
       register: join_result
 
+    - name: Create /etc/kubernetes/manifests directory on worker nodes
+      file:
+        path: /etc/kubernetes/manifests
+        state: directory
+        mode: '0755'
+      ignore_errors: yes
+      changed_when: true
+
     - name: Display join result
       debug:
         msg: "{{ join_result.stdout_lines }}"

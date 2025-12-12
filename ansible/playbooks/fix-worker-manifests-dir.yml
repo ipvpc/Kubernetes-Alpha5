@@ -1,0 +1,37 @@
+---
+# Playbook: Fix Missing /etc/kubernetes/manifests Directory on Worker Nodes
+# This playbook creates the manifests directory on worker nodes to suppress kubelet warnings
+# Usage: ansible-playbook playbooks/fix-worker-manifests-dir.yml -i inventory-devops.yml
+
+- name: Create manifests directory on worker nodes
+  hosts: workers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Create /etc/kubernetes/manifests directory
+      file:
+        path: /etc/kubernetes/manifests
+        state: directory
+        mode: '0755'
+      changed_when: true
+
+    - name: Verify directory was created
+      stat:
+        path: /etc/kubernetes/manifests
+      register: manifests_dir_check
+
+    - name: Display fix status
+      debug:
+        msg: |
+          ==========================================
+          Worker Node Manifests Directory Fix
+          ==========================================
+          Node: {{ inventory_hostname }}
+          Directory created: {{ manifests_dir_check.stat.exists | default(false) }}
+          ==========================================
+          This directory is created to suppress kubelet warnings.
+          Worker nodes don't run control plane components, so this
+          directory will remain empty.
+          ==========================================
+
