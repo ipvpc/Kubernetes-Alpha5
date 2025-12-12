@@ -17,12 +17,15 @@
       stat:
         path: /etc/kubernetes/admin.conf
       register: admin_conf_exists
-      when: inventory_hostname in groups['control_plane']
+      failed_when: false
+      changed_when: false
 
     - name: Check if copied kubeconfig exists
       stat:
         path: /root/.kube/config
       register: copied_kubeconfig_exists
+      failed_when: false
+      changed_when: false
 
     # Fix kubectl kubeconfig on master
     - name: Copy admin.conf to .kube/config on master
@@ -33,7 +36,8 @@
         mode: '0644'
       when: 
         - inventory_hostname in groups['control_plane']
-        - admin_conf_exists.stat.exists
+        - admin_conf_exists is defined
+        - (admin_conf_exists.stat.exists | default(false))
 
     - name: Update kubectl kubeconfig server endpoint
       replace:
@@ -41,10 +45,18 @@
         regexp: '^\s*server:\s*https://(127\.0\.0\.1|localhost):6443'
         replace: '    server: https://{{ master_ip }}:6443'
       when: 
-        - copied_kubeconfig_exists.stat.exists or admin_conf_exists.stat.exists
         - inventory_hostname in groups['control_plane']
+        - copied_kubeconfig_exists is defined
+        - (copied_kubeconfig_exists.stat.exists | default(false)) or (admin_conf_exists is defined and (admin_conf_exists.stat.exists | default(false)))
 
     # Fix kubelet kubeconfig on all nodes
+    - name: Check if kubelet kubeconfig exists
+      stat:
+        path: /var/lib/kubelet/kubeconfig
+      register: kubelet_kubeconfig_exists
+      failed_when: false
+      changed_when: false
+
     - name: Copy admin.conf to kubelet kubeconfig on master
       copy:
         src: /etc/kubernetes/admin.conf
@@ -53,7 +65,8 @@
         mode: '0644'
       when:
         - inventory_hostname in groups['control_plane']
-        - admin_conf_exists.stat.exists
+        - admin_conf_exists is defined
+        - (admin_conf_exists.stat.exists | default(false))
 
     - name: Update kubelet kubeconfig server endpoint on master
       replace:
@@ -62,7 +75,8 @@
         replace: '    server: https://{{ master_ip }}:6443'
       when:
         - inventory_hostname in groups['control_plane']
-        - admin_conf_exists.stat.exists
+        - kubelet_kubeconfig_exists is defined
+        - (kubelet_kubeconfig_exists.stat.exists | default(false))
 
     - name: Restart kubelet to apply changes
       systemd:
