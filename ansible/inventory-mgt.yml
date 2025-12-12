@@ -8,7 +8,7 @@ all:
     ansible_python_interpreter: /usr/bin/python3
     
     # Kubernetes Configuration
-    kubernetes_version: "1.34.0"  # Kubernetes version to install
+    kubernetes_version: "1.28.0"  # Kubernetes version to install (stable version)
     container_runtime: "containerd"  # Options: containerd, docker
     pod_network_cidr: "10.244.0.0/16"  # Pod network CIDR (for Flannel/Calico)
     
