@@ -795,7 +795,7 @@
       when: 
         - admin_conf_exists.stat.exists
         - coredns_install is defined
-        - coredns_install.rc == 0 | default(false)
+        - (coredns_install.rc | default(999)) == 0
 
     - name: Wait for API server to be ready (using copied config)
       shell: kubectl --kubeconfig=/root/.kube/config get nodes
