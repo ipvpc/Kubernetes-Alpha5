@@ -54,13 +54,6 @@ app_configs = {
 ./scripts/deploy.sh dev apply
 ```
 
-**PowerShell (Windows):**
-```powershell
-.\scripts\deploy.ps1 dev init
-.\scripts\deploy.ps1 dev plan
-.\scripts\deploy.ps1 dev apply
-```
-
 #### Option B: Using Make
 
 ```bash

@@ -34,6 +34,71 @@ provider "helm" {
   }
 }
 
+# Wait for Rancher webhook to be ready (if Rancher is installed)
+# This prevents "connection refused" errors when creating namespaces
+# Rancher webhook intercepts namespace creation and must be ready first
+resource "null_resource" "wait_for_rancher_webhook" {
+  # Only wait if Rancher might be installed (check if webhook exists)
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      echo "Checking for Rancher webhook..."
+      
+      # Check if Rancher webhook validating admission webhook exists
+      if kubectl get validatingadmissionwebhook rancher.cattle.io.namespaces.create-non-kubesystem >/dev/null 2>&1 || \
+         kubectl get validatingadmissionwebhook 2>/dev/null | grep -q "rancher.cattle.io"; then
+        echo "Rancher webhook detected, waiting for it to be ready..."
+        
+        max_attempts=60
+        attempt=0
+        while [ $attempt -lt $max_attempts ]; do
+          # Check if webhook service exists
+          if kubectl get svc rancher-webhook -n cattle-system >/dev/null 2>&1; then
+            # Check if webhook pods are running
+            RUNNING_PODS=$(kubectl get pods -n cattle-system -l app=rancher-webhook --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l || echo "0")
+            if [ "$RUNNING_PODS" -gt 0 ]; then
+              # Get current webhook service IP
+              WEBHOOK_IP=$(kubectl get svc rancher-webhook -n cattle-system -o jsonpath='{.spec.clusterIP}' 2>/dev/null || echo "")
+              # Check if endpoints are ready (this verifies the service is actually routing to pods)
+              ENDPOINT_READY=$(kubectl get endpoints rancher-webhook -n cattle-system -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || echo "")
+              if [ -n "$WEBHOOK_IP" ] && [ -n "$ENDPOINT_READY" ]; then
+                echo "✓ Rancher webhook service found at $WEBHOOK_IP"
+                echo "✓ Rancher webhook endpoint ready at $ENDPOINT_READY"
+                echo "✓ Rancher webhook is ready!"
+                exit 0
+              fi
+            fi
+          fi
+          attempt=$((attempt + 1))
+          if [ $((attempt % 6)) -eq 0 ]; then
+            echo "Attempt $attempt/$max_attempts: Checking webhook status..."
+            kubectl get pods -n cattle-system -l app=rancher-webhook 2>/dev/null || true
+            kubectl get svc rancher-webhook -n cattle-system 2>/dev/null || true
+          else
+            echo "Attempt $attempt/$max_attempts: Rancher webhook not ready yet, waiting 5 seconds..."
+          fi
+          sleep 5
+        done
+        echo "WARNING: Rancher webhook not ready after $max_attempts attempts"
+        echo "Troubleshooting steps:"
+        echo "  1. Check webhook pods: kubectl get pods -n cattle-system -l app=rancher-webhook"
+        echo "  2. Check webhook service: kubectl get svc rancher-webhook -n cattle-system"
+        echo "  3. Check webhook endpoints: kubectl get endpoints rancher-webhook -n cattle-system"
+        echo "  4. If webhook is broken, you may need to restart it:"
+        echo "     kubectl delete pod -n cattle-system -l app=rancher-webhook"
+        echo "Proceeding anyway - namespace creation may fail if webhook is not ready..."
+      else
+        echo "No Rancher webhook detected, skipping wait..."
+      fi
+    EOT
+  }
+  
+  # Trigger this check on every apply to ensure webhook is ready
+  triggers = {
+    always_run = timestamp()
+  }
+}
+
 # Create namespace for the environment
 resource "kubernetes_namespace" "environment" {
   metadata {
@@ -42,7 +107,15 @@ resource "kubernetes_namespace" "environment" {
       environment = var.environment
       managed-by  = "terraform"
     }
+    # Add annotation to help with Rancher webhook if needed
+    annotations = {
+      # This annotation can help bypass webhook validation in some cases
+      # but we'll rely on waiting for webhook to be ready instead
+    }
   }
+  
+  # Wait for Rancher webhook to be ready before creating namespace
+  depends_on = [null_resource.wait_for_rancher_webhook]
 }
 
 # Deploy Ingress Controller (optional)
