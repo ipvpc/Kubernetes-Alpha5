@@ -1,0 +1,137 @@
+---
+# Playbook: Fix Missing Kubelet Config File
+# This playbook fixes missing /var/lib/kubelet/config.yaml on worker nodes
+# Usage: ansible-playbook playbooks/fix-kubelet-config.yml -i inventory-devops.yml
+
+- name: Fix missing kubelet config on worker nodes
+  hosts: workers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Get master node IP
+      set_fact:
+        master_ip: "{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}"
+
+    - name: Set CRI socket path
+      set_fact:
+        cri_socket: "{% if container_runtime == 'containerd' %}unix:///var/run/containerd/containerd.sock{% elif container_runtime == 'crio' %}unix:///var/run/crio/crio.sock{% else %}unix:///var/run/containerd/containerd.sock{% endif %}"
+
+    - name: Check if kubelet config exists
+      stat:
+        path: /var/lib/kubelet/config.yaml
+      register: kubelet_config_exists
+
+    - name: Check if node is already joined
+      shell: kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get nodes -o name 2>/dev/null | grep $(hostname) || echo "NOT_JOINED"
+      register: node_joined_check
+      changed_when: false
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Check if kubelet.conf exists
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf_exists
+
+    - name: Get kubelet config from cluster if node is joined
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get configmap kubelet-config -n kube-system -o jsonpath='{.data.kubelet}' > /var/lib/kubelet/config.yaml
+      register: download_config
+      changed_when: download_config.rc == 0
+      when:
+        - kubelet_conf_exists.stat.exists
+        - not kubelet_config_exists.stat.exists
+        - "'NOT_JOINED' not in node_joined_check.stdout"
+
+    - name: Create kubelet config directory if it doesn't exist
+      file:
+        path: /var/lib/kubelet
+        state: directory
+        mode: '0755'
+      when: not kubelet_config_exists.stat.exists
+
+    - name: Generate kubelet config using kubeadm if download failed
+      shell: |
+        # Try to get config from master node's kubelet configmap
+        # First, try to download from master
+        if [ -f /etc/kubernetes/kubelet.conf ]; then
+          # Node is joined, try to get config from cluster
+          kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get configmap kubelet-config -n kube-system -o jsonpath='{.data.kubelet}' > /var/lib/kubelet/config.yaml 2>/dev/null || true
+        fi
+        
+        # If still doesn't exist, create a minimal config
+        if [ ! -f /var/lib/kubelet/config.yaml ]; then
+          cat > /var/lib/kubelet/config.yaml <<EOF
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+clusterDNS:
+- 10.96.0.10
+clusterDomain: cluster.local
+failSwapOn: true
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    enabled: true
+  x509:
+    clientCAFile: /etc/kubernetes/pki/ca.crt
+authorization:
+  mode: Webhook
+EOF
+        fi
+      register: generate_config
+      changed_when: generate_config.rc == 0
+      when: not kubelet_config_exists.stat.exists
+
+    - name: Set proper permissions on kubelet config
+      file:
+        path: /var/lib/kubelet/config.yaml
+        mode: '0644'
+        owner: root
+        group: root
+      when: kubelet_config_exists.stat.exists or generate_config is defined
+
+    - name: Verify kubelet config file exists
+      stat:
+        path: /var/lib/kubelet/config.yaml
+      register: final_config_check
+
+    - name: Restart kubelet to apply config
+      systemd:
+        name: kubelet
+        state: restarted
+      ignore_errors: yes
+
+    - name: Wait for kubelet to restart
+      pause:
+        seconds: 5
+
+    - name: Check kubelet status
+      shell: systemctl status kubelet --no-pager | head -10
+      register: kubelet_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display fix status
+      debug:
+        msg: |
+          ==========================================
+          Kubelet Config Fix Summary
+          ==========================================
+          Node: {{ inventory_hostname }}
+          Config file exists: {{ final_config_check.stat.exists | default(false) }}
+          Kubelet restarted: Yes
+          ==========================================
+          {% if kubelet_status is defined %}
+          Kubelet status:
+          {{ kubelet_status.stdout_lines }}
+          {% endif %}
+          ==========================================
+          If kubelet is still failing, check:
+          1. Node is properly joined: kubectl get nodes
+          2. Kubelet logs: journalctl -u kubelet -n 50
+          3. Config file: cat /var/lib/kubelet/config.yaml
+          ==========================================
+

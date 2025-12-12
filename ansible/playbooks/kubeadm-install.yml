@@ -585,6 +585,32 @@
         replace: '    server: https://{{ master_ip }}:6443'
       when: kubeconfig_stat.stat.exists
 
+    - name: Fix kubelet kubeconfig on master node
+      block:
+        - name: Check if kubelet kubeconfig exists
+          stat:
+            path: /var/lib/kubelet/kubeconfig
+          register: kubelet_kubeconfig_exists
+
+        - name: Copy admin.conf to kubelet kubeconfig if it doesn't exist
+          copy:
+            src: /etc/kubernetes/admin.conf
+            dest: /var/lib/kubelet/kubeconfig
+            remote_src: true
+            mode: '0644'
+          when: 
+            - admin_conf_exists.stat.exists
+            - not kubelet_kubeconfig_exists.stat.exists
+
+        - name: Update kubelet kubeconfig server endpoint
+          replace:
+            path: /var/lib/kubelet/kubeconfig
+            regexp: '^\s*server:\s*https://(127\.0\.0\.1|localhost):6443'
+            replace: '    server: https://{{ master_ip }}:6443'
+          when: 
+            - kubelet_kubeconfig_exists.stat.exists or admin_conf_exists.stat.exists
+            - admin_conf_exists.stat.exists
+
     - name: Check if API server is listening on port 6443
       shell: |
         netstat -tlnp 2>/dev/null | grep ':6443' || ss -tlnp 2>/dev/null | grep ':6443' || echo "Port check failed"
@@ -942,6 +968,28 @@
         mode: '0755'
       ignore_errors: yes
       changed_when: true
+
+    - name: Verify kubelet config was created after join
+      stat:
+        path: /var/lib/kubelet/config.yaml
+      register: kubelet_config_check
+      changed_when: false
+
+    - name: Get kubelet config from cluster if missing
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get configmap kubelet-config -n kube-system -o jsonpath='{.data.kubelet}' > /var/lib/kubelet/config.yaml
+      register: download_kubelet_config
+      changed_when: download_kubelet_config.rc == 0
+      when:
+        - not kubelet_config_check.stat.exists
+        - join_result is defined
+        - (join_result.rc | default(999)) == 0
+
+    - name: Verify kubelet config exists after fix
+      stat:
+        path: /var/lib/kubelet/config.yaml
+      register: final_kubelet_config_check
+      when: download_kubelet_config is defined
 
     - name: Display join result
       debug:
