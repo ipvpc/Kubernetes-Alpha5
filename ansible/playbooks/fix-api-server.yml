@@ -1,0 +1,183 @@
+---
+# Playbook: Fix API Server Connection Issues
+# This playbook fixes API server bind address and restarts it
+# Usage: ansible-playbook playbooks/fix-api-server.yml -i inventory-devops.yml
+
+- name: Fix API server connection issues
+  hosts: control_plane[0]
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Get master node IP
+      set_fact:
+        master_ip: "{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}"
+
+    - name: Check if API server manifest exists
+      stat:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+      register: api_manifest_exists
+
+    - name: Fail if API server manifest doesn't exist
+      fail:
+        msg: "API server manifest not found at /etc/kubernetes/manifests/kube-apiserver.yaml. Is the cluster initialized?"
+      when: not api_manifest_exists.stat.exists
+
+    - name: Check current API server bind address
+      shell: grep -E '^\s*-\s*--bind-address' /etc/kubernetes/manifests/kube-apiserver.yaml || echo "bind-address not found"
+      register: current_bind_address
+      changed_when: false
+      failed_when: false
+
+    - name: Check current API server advertise address
+      shell: grep -E '^\s*-\s*--advertise-address' /etc/kubernetes/manifests/kube-apiserver.yaml || echo "advertise-address not found"
+      register: current_advertise_address
+      changed_when: false
+      failed_when: false
+
+    - name: Display current API server configuration
+      debug:
+        msg: |
+          Current bind address: {{ current_bind_address.stdout }}
+          Current advertise address: {{ current_advertise_address.stdout }}
+          Master IP: {{ master_ip }}
+
+    - name: Fix API server bind address if binding to localhost
+      replace:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        regexp: '^\s*-\s*--bind-address=127\.0\.0\.1'
+        replace: '    - --bind-address=0.0.0.0'
+      register: fix_bind_address
+      when: "'127.0.0.1' in current_bind_address.stdout"
+
+    - name: Fix API server advertise address if using localhost
+      replace:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        regexp: '^\s*-\s*--advertise-address=127\.0\.0\.1'
+        replace: '    - --advertise-address={{ master_ip }}'
+      register: fix_advertise_address
+      when: "'127.0.0.1' in current_advertise_address.stdout"
+
+    - name: Add bind address if missing
+      lineinfile:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        line: '    - --bind-address=0.0.0.0'
+        insertafter: '^\s*-\s*--authorization-mode'
+        backup: yes
+      register: add_bind_address
+      when: current_bind_address.stdout == "bind-address not found"
+
+    - name: Add advertise address if missing
+      lineinfile:
+        path: /etc/kubernetes/manifests/kube-apiserver.yaml
+        line: '    - --advertise-address={{ master_ip }}'
+        insertafter: '^\s*-\s*--bind-address'
+        backup: yes
+      register: add_advertise_address
+      when: current_advertise_address.stdout == "advertise-address not found"
+
+    - name: Restart kubelet to apply API server changes
+      systemd:
+        name: kubelet
+        state: restarted
+      when: 
+        - fix_bind_address.changed | default(false) or 
+          fix_advertise_address.changed | default(false) or 
+          add_bind_address.changed | default(false) or 
+          add_advertise_address.changed | default(false)
+
+    - name: Wait for kubelet to restart
+      pause:
+        seconds: 10
+      when: 
+        - fix_bind_address.changed | default(false) or 
+          fix_advertise_address.changed | default(false) or 
+          add_bind_address.changed | default(false) or 
+          add_advertise_address.changed | default(false)
+
+    - name: Wait for API server to be accessible
+      shell: |
+        for i in {1..60}; do
+          if curl -k -s https://{{ master_ip }}:6443/healthz 2>/dev/null | grep -q "ok"; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      register: api_server_wait
+      retries: 1
+      delay: 0
+      until: api_server_wait.rc == 0
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Check API server pod status
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf get pods -n kube-system -l component=kube-apiserver -o wide 2>/dev/null || \
+        kubectl --kubeconfig=/root/.kube/config get pods -n kube-system -l component=kube-apiserver -o wide 2>/dev/null || \
+        echo "API server check failed"
+      register: api_server_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display API server status
+      debug:
+        msg: "{{ api_server_status.stdout_lines }}"
+      when: api_server_status is defined
+
+    - name: Check if API server is listening on port 6443
+      shell: |
+        netstat -tlnp 2>/dev/null | grep ':6443' || ss -tlnp 2>/dev/null | grep ':6443' || echo "Port 6443 not listening"
+      register: port_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display port check results
+      debug:
+        msg: "Port 6443 status: {{ port_check.stdout }}"
+
+    - name: Restart control plane components if API server is fixed
+      shell: |
+        # Delete scheduler and controller-manager pods to force restart
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete pod -n kube-system -l component=kube-scheduler --ignore-not-found 2>/dev/null || \
+        kubectl --kubeconfig=/root/.kube/config delete pod -n kube-system -l component=kube-scheduler --ignore-not-found 2>/dev/null || true
+        
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete pod -n kube-system -l component=kube-controller-manager --ignore-not-found 2>/dev/null || \
+        kubectl --kubeconfig=/root/.kube/config delete pod -n kube-system -l component=kube-controller-manager --ignore-not-found 2>/dev/null || true
+      register: restart_components
+      changed_when: restart_components.rc == 0
+      failed_when: false
+      when: api_server_wait.rc == 0
+
+    - name: Wait for control plane components to be ready
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=ready pod -l component=kube-scheduler -n kube-system --timeout=120s 2>/dev/null && \
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=ready pod -l component=kube-controller-manager -n kube-system --timeout=120s 2>/dev/null || \
+        kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l component=kube-scheduler -n kube-system --timeout=120s 2>/dev/null && \
+        kubectl --kubeconfig=/root/.kube/config wait --for=condition=ready pod -l component=kube-controller-manager -n kube-system --timeout=120s 2>/dev/null || true
+      register: components_wait
+      retries: 5
+      delay: 10
+      until: components_wait.rc == 0
+      changed_when: false
+      ignore_errors: yes
+      when: api_server_wait.rc == 0
+
+    - name: Display final status
+      debug:
+        msg: |
+          ==========================================
+          API Server Fix Summary
+          ==========================================
+          Master IP: {{ master_ip }}
+          API Server Bind Address: {{ 'Fixed to 0.0.0.0' if (fix_bind_address.changed | default(false) or add_bind_address.changed | default(false)) else 'Already correct' }}
+          API Server Advertise Address: {{ 'Fixed to ' + master_ip if (fix_advertise_address.changed | default(false) or add_advertise_address.changed | default(false)) else 'Already correct' }}
+          API Server Accessible: {{ 'Yes' if (api_server_wait.rc | default(999)) == 0 else 'No - check logs' }}
+          Port 6443 Listening: {{ 'Yes' if '6443' in port_check.stdout else 'No' }}
+          ==========================================
+          If API server is still not accessible:
+          1. Check kubelet logs: journalctl -u kubelet -n 50
+          2. Check API server pod: kubectl get pods -n kube-system -l component=kube-apiserver
+          3. Check API server logs: kubectl logs -n kube-system -l component=kube-apiserver
+          ==========================================
+

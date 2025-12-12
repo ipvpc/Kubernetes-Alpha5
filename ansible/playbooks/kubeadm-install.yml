@@ -643,9 +643,19 @@
       failed_when: false
       when: admin_conf_exists.stat.exists
 
-    - name: Display API server bind address
+    - name: Check API server manifest advertise address
+      shell: grep -E '^\s*-\s*--advertise-address' /etc/kubernetes/manifests/kube-apiserver.yaml || echo "advertise-address not found"
+      register: api_advertise_address
+      changed_when: false
+      failed_when: false
+      when: admin_conf_exists.stat.exists
+
+    - name: Display API server configuration
       debug:
-        msg: "API server bind address: {{ api_bind_address.stdout }}"
+        msg: |
+          API server bind address: {{ api_bind_address.stdout }}
+          API server advertise address: {{ api_advertise_address.stdout }}
+          Master IP: {{ master_ip }}
 
     - name: Fix API server bind address if binding to localhost
       replace:
@@ -657,14 +667,14 @@
         - "'127.0.0.1' in api_bind_address.stdout"
       register: bind_address_fix
 
-    - name: Ensure advertise address is set correctly
+    - name: Fix API server advertise address if using localhost
       replace:
         path: /etc/kubernetes/manifests/kube-apiserver.yaml
         regexp: '^\s*-\s*--advertise-address=127\.0\.0\.1'
         replace: '    - --advertise-address={{ master_ip }}'
       when: 
         - admin_conf_exists.stat.exists
-        - "'127.0.0.1' in api_bind_address.stdout"
+        - "'127.0.0.1' in api_advertise_address.stdout"
       register: advertise_address_fix
 
     - name: Add bind address if missing
@@ -686,13 +696,20 @@
         backup: yes
       when: 
         - admin_conf_exists.stat.exists
-        - api_bind_address.stdout == "bind-address not found"
+        - api_advertise_address.stdout == "advertise-address not found"
       register: add_advertise_address
 
     - name: Restart kubelet if API server config was changed
       systemd:
         name: kubelet
         state: restarted
+      when: 
+        - admin_conf_exists.stat.exists
+        - bind_address_fix.changed | default(false) or advertise_address_fix.changed | default(false) or add_bind_address.changed | default(false) or add_advertise_address.changed | default(false)
+
+    - name: Wait for API server to restart after config change
+      pause:
+        seconds: 15
       when: 
         - admin_conf_exists.stat.exists
         - bind_address_fix.changed | default(false) or advertise_address_fix.changed | default(false) or add_bind_address.changed | default(false) or add_advertise_address.changed | default(false)
@@ -756,6 +773,49 @@
       when: 
         - kubeconfig_stat.stat.exists
         - not admin_conf_exists.stat.exists
+
+    - name: Verify API server is accessible via master IP
+      shell: |
+        for i in {1..30}; do
+          if curl -k -s https://{{ master_ip }}:6443/healthz 2>/dev/null | grep -q "ok"; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      register: api_server_accessible_check
+      retries: 3
+      delay: 5
+      until: api_server_accessible_check.rc == 0
+      changed_when: false
+      ignore_errors: yes
+      when: admin_conf_exists.stat.exists
+
+    - name: Restart control plane components if API server was fixed
+      shell: |
+        # Delete scheduler and controller-manager pods to force restart and reconnect
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete pod -n kube-system -l component=kube-scheduler --ignore-not-found 2>/dev/null || true
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf delete pod -n kube-system -l component=kube-controller-manager --ignore-not-found 2>/dev/null || true
+      register: restart_control_plane
+      changed_when: restart_control_plane.rc == 0
+      failed_when: false
+      when: 
+        - admin_conf_exists.stat.exists
+        - bind_address_fix.changed | default(false) or advertise_address_fix.changed | default(false) or add_bind_address.changed | default(false) or add_advertise_address.changed | default(false)
+
+    - name: Wait for control plane components to be ready after restart
+      shell: |
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=ready pod -l component=kube-scheduler -n kube-system --timeout=120s 2>/dev/null && \
+        kubectl --kubeconfig=/etc/kubernetes/admin.conf wait --for=condition=ready pod -l component=kube-controller-manager -n kube-system --timeout=120s 2>/dev/null || true
+      register: control_plane_wait
+      retries: 5
+      delay: 10
+      until: control_plane_wait.rc == 0
+      changed_when: false
+      ignore_errors: yes
+      when: 
+        - admin_conf_exists.stat.exists
+        - bind_address_fix.changed | default(false) or advertise_address_fix.changed | default(false) or add_bind_address.changed | default(false) or add_advertise_address.changed | default(false)
 
     - name: Wait for API server to be ready (using admin.conf directly)
       shell: kubectl --kubeconfig=/etc/kubernetes/admin.conf get nodes
