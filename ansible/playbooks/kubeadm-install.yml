@@ -68,15 +68,19 @@
         state: present
       when: ansible_os_family == "RedHat"
 
+    - name: Set Kubernetes repository version (major.minor)
+      set_fact:
+        k8s_repo_version: "v{{ kubernetes_version.split('.')[:2] | join('.') }}"
+
     - name: Add Kubernetes GPG key (Debian/Ubuntu)
       apt_key:
-        url: https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
+        url: "https://pkgs.k8s.io/core:/stable:/{{ k8s_repo_version }}/deb/Release.key"
         state: present
       when: ansible_os_family == "Debian"
 
     - name: Add Kubernetes repository (Debian/Ubuntu)
       apt_repository:
-        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /"
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ k8s_repo_version }}/deb/ /"
         state: present
         filename: kubernetes
       when: ansible_os_family == "Debian"
@@ -85,9 +89,9 @@
       yum_repository:
         name: kubernetes
         description: Kubernetes
-        baseurl: https://pkgs.k8s.io/core:/stable:/v1.28/rpm/
+        baseurl: "https://pkgs.k8s.io/core:/stable:/{{ k8s_repo_version }}/rpm/"
         gpgcheck: yes
-        gpgkey: https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key
+        gpgkey: "https://pkgs.k8s.io/core:/stable:/{{ k8s_repo_version }}/rpm/repodata/repomd.xml.key"
         enabled: yes
       when: ansible_os_family == "RedHat"
 
