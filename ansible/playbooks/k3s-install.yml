@@ -8,7 +8,7 @@
   gather_facts: true
   
   vars:
-    k3s_token: "{{ k3s_token | default(lookup('password', '/dev/null length=64 chars=ascii_letters,digits')) }}"
+    k3s_token: "{{ k3s_token | default('') }}"
     
   tasks:
     - name: Check if running on supported OS
@@ -46,6 +46,11 @@
         - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
         - { key: 'net.ipv4.ip_forward', value: '1' }
       when: enable_ip_forwarding | bool
+
+    - name: Generate k3s token if not provided
+      set_fact:
+        k3s_token: "{{ k3s_token | default(lookup('password', '/dev/null length=64 chars=ascii_letters,digits')) }}"
+      when: k3s_token | default('') == ""
 
     - name: Get first control plane node IP
       set_fact:
