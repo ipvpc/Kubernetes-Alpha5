@@ -202,10 +202,10 @@ cd ansible
 
 case $INSTALL_METHOD in
     kubeadm)
-        ansible-playbook playbooks/devops-cluster.yml -i inventory-devops.yml
+        ansible-playbook playbooks/kubeadm-install.yml -i inventory-devops.yml
         ;;
     k3s)
-        ansible-playbook playbooks/devops-cluster.yml -i inventory-devops.yml
+        ansible-playbook playbooks/k3s-install.yml -i inventory-devops.yml
         ;;
     *)
         echo -e "${RED}Error: Unsupported install method: $INSTALL_METHOD${NC}"
