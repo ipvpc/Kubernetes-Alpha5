@@ -1014,27 +1014,28 @@
         - not (config_after_download.stat.exists | default(false))
 
     - name: Create minimal kubelet config if still missing
-      shell: |
-        cat > /var/lib/kubelet/config.yaml <<EOF
-apiVersion: kubelet.config.k8s.io/v1beta1
-kind: KubeletConfiguration
-cgroupDriver: systemd
-clusterDNS:
-- 10.96.0.10
-clusterDomain: cluster.local
-failSwapOn: true
-authentication:
-  anonymous:
-    enabled: false
-  webhook:
-    enabled: true
-  x509:
-    clientCAFile: /etc/kubernetes/pki/ca.crt
-authorization:
-  mode: Webhook
-EOF
+      copy:
+        dest: /var/lib/kubelet/config.yaml
+        content: |
+          apiVersion: kubelet.config.k8s.io/v1beta1
+          kind: KubeletConfiguration
+          cgroupDriver: systemd
+          clusterDNS:
+          - 10.96.0.10
+          clusterDomain: cluster.local
+          failSwapOn: true
+          authentication:
+            anonymous:
+              enabled: false
+            webhook:
+              enabled: true
+            x509:
+              clientCAFile: /etc/kubernetes/pki/ca.crt
+          authorization:
+            mode: Webhook
+        mode: '0644'
       register: create_minimal_config
-      changed_when: create_minimal_config.rc == 0
+      changed_when: true
       when:
         - not kubelet_config_check.stat.exists
         - not (config_after_download.stat.exists | default(false))

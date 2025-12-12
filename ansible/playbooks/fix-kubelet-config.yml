@@ -60,30 +60,28 @@
       when: download_config is defined
 
     - name: Generate minimal kubelet config if download failed or node not joined
-      shell: |
-        # If still doesn't exist, create a minimal config
-        if [ ! -f /var/lib/kubelet/config.yaml ]; then
-          cat > /var/lib/kubelet/config.yaml <<EOF
-apiVersion: kubelet.config.k8s.io/v1beta1
-kind: KubeletConfiguration
-cgroupDriver: systemd
-clusterDNS:
-- 10.96.0.10
-clusterDomain: cluster.local
-failSwapOn: true
-authentication:
-  anonymous:
-    enabled: false
-  webhook:
-    enabled: true
-  x509:
-    clientCAFile: /etc/kubernetes/pki/ca.crt
-authorization:
-  mode: Webhook
-EOF
-        fi
+      copy:
+        dest: /var/lib/kubelet/config.yaml
+        content: |
+          apiVersion: kubelet.config.k8s.io/v1beta1
+          kind: KubeletConfiguration
+          cgroupDriver: systemd
+          clusterDNS:
+          - 10.96.0.10
+          clusterDomain: cluster.local
+          failSwapOn: true
+          authentication:
+            anonymous:
+              enabled: false
+            webhook:
+              enabled: true
+            x509:
+              clientCAFile: /etc/kubernetes/pki/ca.crt
+          authorization:
+            mode: Webhook
+        mode: '0644'
       register: generate_config
-      changed_when: generate_config.rc == 0
+      changed_when: true
       when:
         - not kubelet_config_exists.stat.exists
         - not (config_after_download.stat.exists | default(false))
