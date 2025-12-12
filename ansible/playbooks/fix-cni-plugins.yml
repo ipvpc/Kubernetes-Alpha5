@@ -1,0 +1,106 @@
+---
+# Playbook: Fix Missing CNI Plugins
+# This playbook installs the required CNI plugin binaries (loopback, bridge, etc.)
+# Usage: ansible-playbook playbooks/fix-cni-plugins.yml -i inventory-devops.yml
+
+- name: Install CNI plugins on all nodes
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install CNI plugins (Debian/Ubuntu)
+      block:
+        - name: Download CNI plugins
+          get_url:
+            url: "https://github.com/containernetworking/plugins/releases/download/v1.3.0/cni-plugins-linux-{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}-v1.3.0.tgz"
+            dest: /tmp/cni-plugins.tgz
+            mode: '0644'
+
+        - name: Create CNI bin directory
+          file:
+            path: /opt/cni/bin
+            state: directory
+            mode: '0755'
+
+        - name: Extract CNI plugins
+          unarchive:
+            src: /tmp/cni-plugins.tgz
+            dest: /opt/cni/bin
+            remote_src: yes
+            creates: /opt/cni/bin/loopback
+
+        - name: Clean up CNI plugins archive
+          file:
+            path: /tmp/cni-plugins.tgz
+            state: absent
+      when: ansible_os_family == "Debian"
+
+    - name: Install CNI plugins (RedHat/CentOS)
+      block:
+        - name: Download CNI plugins
+          get_url:
+            url: "https://github.com/containernetworking/plugins/releases/download/v1.3.0/cni-plugins-linux-{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}-v1.3.0.tgz"
+            dest: /tmp/cni-plugins.tgz
+            mode: '0644'
+
+        - name: Create CNI bin directory
+          file:
+            path: /opt/cni/bin
+            state: directory
+            mode: '0755'
+
+        - name: Extract CNI plugins
+          unarchive:
+            src: /tmp/cni-plugins.tgz
+            dest: /opt/cni/bin
+            remote_src: yes
+            creates: /opt/cni/bin/loopback
+
+        - name: Clean up CNI plugins archive
+          file:
+            path: /tmp/cni-plugins.tgz
+            state: absent
+      when: ansible_os_family == "RedHat"
+
+    - name: Verify CNI plugins installation
+      shell: |
+        ls -la /opt/cni/bin/ | grep -E "(loopback|bridge|host-local|portmap|tuning|vlan|ipvlan|macvlan)"
+      register: cni_plugins_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display installed CNI plugins
+      debug:
+        msg: "{{ cni_plugins_check.stdout_lines }}"
+      when: cni_plugins_check is defined
+
+    - name: Restart kubelet to pick up CNI plugins
+      systemd:
+        name: kubelet
+        state: restarted
+      ignore_errors: yes
+
+    - name: Display fix completion message
+      debug:
+        msg: |
+          ==========================================
+          CNI Plugins Installation Complete!
+          ==========================================
+          The following CNI plugins have been installed:
+          - loopback (required for pod networking)
+          - bridge (required for pod networking)
+          - host-local (required for IPAM)
+          - portmap (required for port mapping)
+          - tuning (required for network tuning)
+          - vlan, ipvlan, macvlan (optional plugins)
+          ==========================================
+          Location: /opt/cni/bin/
+          ==========================================
+          Pods should now be able to start successfully.
+          If pods are still failing, check:
+          1. CNI plugin manifest (Calico/Flannel) is installed
+          2. CNI configuration exists in /etc/cni/net.d/
+          3. kubelet logs: journalctl -u kubelet
+          ==========================================
+
