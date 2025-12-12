@@ -974,6 +974,13 @@
         seconds: 5
       when: join_result is defined
 
+    - name: Stop kubelet to prevent it from starting without config
+      systemd:
+        name: kubelet
+        state: stopped
+      ignore_errors: yes
+      when: join_result is defined
+
     - name: Verify kubelet config was created after join
       stat:
         path: /var/lib/kubelet/config.yaml
@@ -985,6 +992,13 @@
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf_exists
       changed_when: false
+
+    - name: Create kubelet config directory if needed
+      file:
+        path: /var/lib/kubelet
+        state: directory
+        mode: '0755'
+      when: not kubelet_config_check.stat.exists
 
     - name: Get kubelet config from cluster if missing
       shell: |
@@ -1003,15 +1017,6 @@
       register: config_after_download
       changed_when: false
       when: download_kubelet_config is defined
-
-    - name: Create kubelet config directory if needed
-      file:
-        path: /var/lib/kubelet
-        state: directory
-        mode: '0755'
-      when:
-        - not kubelet_config_check.stat.exists
-        - not (config_after_download.stat.exists | default(false))
 
     - name: Create minimal kubelet config if still missing
       copy:
@@ -1047,7 +1052,7 @@
         owner: root
         group: root
       when:
-        - kubelet_config_check.stat.exists or (config_after_download.stat.exists | default(false)) or (create_minimal_config is defined and create_minimal_config.rc == 0)
+        - kubelet_config_check.stat.exists or (config_after_download.stat.exists | default(false)) or (create_minimal_config is defined)
 
     - name: Verify kubelet config exists after all fixes
       stat:
@@ -1059,6 +1064,14 @@
       fail:
         msg: "Failed to create /var/lib/kubelet/config.yaml. The worker node may not have joined properly. Check join_result output and kubelet logs."
       when: not final_kubelet_config_check.stat.exists
+
+    - name: Start and enable kubelet now that config exists
+      systemd:
+        name: kubelet
+        state: started
+        enabled: true
+        daemon_reload: true
+      when: final_kubelet_config_check.stat.exists
 
     - name: Display join result
       debug:

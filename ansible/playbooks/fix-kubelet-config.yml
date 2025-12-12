@@ -17,6 +17,12 @@
       set_fact:
         cri_socket: "{% if container_runtime == 'containerd' %}unix:///var/run/containerd/containerd.sock{% elif container_runtime == 'crio' %}unix:///var/run/crio/crio.sock{% else %}unix:///var/run/containerd/containerd.sock{% endif %}"
 
+    - name: Stop kubelet to prevent errors while fixing config
+      systemd:
+        name: kubelet
+        state: stopped
+      ignore_errors: yes
+
     - name: Check if kubelet config exists
       stat:
         path: /var/lib/kubelet/config.yaml
@@ -99,15 +105,18 @@
         path: /var/lib/kubelet/config.yaml
       register: final_config_check
 
-    - name: Restart kubelet to apply config
+    - name: Start and enable kubelet now that config exists
       systemd:
         name: kubelet
-        state: restarted
-      ignore_errors: yes
+        state: started
+        enabled: true
+        daemon_reload: true
+      when: final_config_check.stat.exists
 
-    - name: Wait for kubelet to restart
+    - name: Wait for kubelet to start
       pause:
         seconds: 5
+      when: final_config_check.stat.exists
 
     - name: Check kubelet status
       shell: systemctl status kubelet --no-pager | head -10
