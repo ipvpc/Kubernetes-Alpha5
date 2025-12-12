@@ -157,6 +157,24 @@
         - kubeconfig_check.stat.exists
         - setup_network_isolation | bool
 
+    - name: Wait for CNI to be ready before installing Traefik
+      shell: |
+        if kubectl --kubeconfig={{ kubeconfig }} get daemonset -n kube-system calico-node 2>/dev/null; then
+          kubectl --kubeconfig={{ kubeconfig }} wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s
+        elif kubectl --kubeconfig={{ kubeconfig }} get daemonset -n kube-flannel kube-flannel-ds 2>/dev/null; then
+          kubectl --kubeconfig={{ kubeconfig }} wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=300s
+        else
+          echo "Waiting for CNI pods to be ready..."
+          sleep 30
+        fi
+      register: cni_ready_for_traefik
+      retries: 10
+      delay: 10
+      until: cni_ready_for_traefik.rc == 0
+      changed_when: false
+      ignore_errors: yes
+      when: kubeconfig_check.stat.exists
+
     - name: Install Traefik Ingress Controller
       block:
         - name: Create Traefik namespace
@@ -283,6 +301,9 @@
           retries: 3
           delay: 10
           until: traefik_install.rc == 0
+          changed_when: traefik_install.rc == 0
+          failed_when: false
+          ignore_errors: yes
           when: kubeconfig_check.stat.exists
 
         - name: Wait for Traefik to be ready
@@ -347,7 +368,7 @@
           - HTTP: http://{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}:30080
           - HTTPS: https://{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}:30443
           - Dashboard: http://{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}:30880
-          - Status: {{ 'Ready' if traefik_wait.rc == 0 | default(false) else 'Check manually' }}
+          - Status: {{ 'Ready' if (traefik_wait is defined and (traefik_wait.rc | default(999)) == 0) else 'Check manually' }}
           
           {% if setup_network_isolation %}
           
