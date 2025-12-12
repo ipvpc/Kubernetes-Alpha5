@@ -34,16 +34,6 @@
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf_exists
 
-    - name: Get kubelet config from cluster if node is joined
-      shell: |
-        kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get configmap kubelet-config -n kube-system -o jsonpath='{.data.kubelet}' > /var/lib/kubelet/config.yaml
-      register: download_config
-      changed_when: download_config.rc == 0
-      when:
-        - kubelet_conf_exists.stat.exists
-        - not kubelet_config_exists.stat.exists
-        - "'NOT_JOINED' not in node_joined_check.stdout"
-
     - name: Create kubelet config directory if it doesn't exist
       file:
         path: /var/lib/kubelet
@@ -51,15 +41,26 @@
         mode: '0755'
       when: not kubelet_config_exists.stat.exists
 
-    - name: Generate kubelet config using kubeadm if download failed
+    - name: Get kubelet config from cluster if node is joined
       shell: |
-        # Try to get config from master node's kubelet configmap
-        # First, try to download from master
-        if [ -f /etc/kubernetes/kubelet.conf ]; then
-          # Node is joined, try to get config from cluster
-          kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get configmap kubelet-config -n kube-system -o jsonpath='{.data.kubelet}' > /var/lib/kubelet/config.yaml 2>/dev/null || true
-        fi
-        
+        # Try to download from cluster ConfigMap
+        kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get configmap kubelet-config -n kube-system -o jsonpath='{.data.kubelet}' > /var/lib/kubelet/config.yaml 2>/dev/null || true
+      register: download_config
+      changed_when: download_config.rc == 0
+      when:
+        - kubelet_conf_exists.stat.exists
+        - not kubelet_config_exists.stat.exists
+        - "'NOT_JOINED' not in node_joined_check.stdout"
+
+    - name: Verify config was downloaded
+      stat:
+        path: /var/lib/kubelet/config.yaml
+      register: config_after_download
+      changed_when: false
+      when: download_config is defined
+
+    - name: Generate minimal kubelet config if download failed or node not joined
+      shell: |
         # If still doesn't exist, create a minimal config
         if [ ! -f /var/lib/kubelet/config.yaml ]; then
           cat > /var/lib/kubelet/config.yaml <<EOF
@@ -83,7 +84,9 @@ EOF
         fi
       register: generate_config
       changed_when: generate_config.rc == 0
-      when: not kubelet_config_exists.stat.exists
+      when:
+        - not kubelet_config_exists.stat.exists
+        - not (config_after_download.stat.exists | default(false))
 
     - name: Set proper permissions on kubelet config
       file:

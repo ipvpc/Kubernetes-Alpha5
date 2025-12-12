@@ -969,27 +969,95 @@
       ignore_errors: yes
       changed_when: true
 
+    - name: Wait a moment for kubeadm to finish writing config files
+      pause:
+        seconds: 5
+      when: join_result is defined
+
     - name: Verify kubelet config was created after join
       stat:
         path: /var/lib/kubelet/config.yaml
       register: kubelet_config_check
       changed_when: false
 
+    - name: Check if kubelet.conf exists (needed to download config)
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf_exists
+      changed_when: false
+
     - name: Get kubelet config from cluster if missing
       shell: |
-        kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get configmap kubelet-config -n kube-system -o jsonpath='{.data.kubelet}' > /var/lib/kubelet/config.yaml
+        # Try to download from cluster ConfigMap
+        kubectl --kubeconfig=/etc/kubernetes/kubelet.conf get configmap kubelet-config -n kube-system -o jsonpath='{.data.kubelet}' > /var/lib/kubelet/config.yaml 2>/dev/null || true
       register: download_kubelet_config
       changed_when: download_kubelet_config.rc == 0
       when:
         - not kubelet_config_check.stat.exists
+        - kubelet_conf_exists.stat.exists
         - join_result is defined
-        - (join_result.rc | default(999)) == 0
 
-    - name: Verify kubelet config exists after fix
+    - name: Verify config was downloaded
+      stat:
+        path: /var/lib/kubelet/config.yaml
+      register: config_after_download
+      changed_when: false
+      when: download_kubelet_config is defined
+
+    - name: Create kubelet config directory if needed
+      file:
+        path: /var/lib/kubelet
+        state: directory
+        mode: '0755'
+      when:
+        - not kubelet_config_check.stat.exists
+        - not (config_after_download.stat.exists | default(false))
+
+    - name: Create minimal kubelet config if still missing
+      shell: |
+        cat > /var/lib/kubelet/config.yaml <<EOF
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+clusterDNS:
+- 10.96.0.10
+clusterDomain: cluster.local
+failSwapOn: true
+authentication:
+  anonymous:
+    enabled: false
+  webhook:
+    enabled: true
+  x509:
+    clientCAFile: /etc/kubernetes/pki/ca.crt
+authorization:
+  mode: Webhook
+EOF
+      register: create_minimal_config
+      changed_when: create_minimal_config.rc == 0
+      when:
+        - not kubelet_config_check.stat.exists
+        - not (config_after_download.stat.exists | default(false))
+
+    - name: Set proper permissions on kubelet config
+      file:
+        path: /var/lib/kubelet/config.yaml
+        mode: '0644'
+        owner: root
+        group: root
+      when:
+        - kubelet_config_check.stat.exists or (config_after_download.stat.exists | default(false)) or (create_minimal_config is defined and create_minimal_config.rc == 0)
+
+    - name: Verify kubelet config exists after all fixes
       stat:
         path: /var/lib/kubelet/config.yaml
       register: final_kubelet_config_check
-      when: download_kubelet_config is defined
+      changed_when: false
+
+    - name: Fail if kubelet config still doesn't exist
+      fail:
+        msg: "Failed to create /var/lib/kubelet/config.yaml. The worker node may not have joined properly. Check join_result output and kubelet logs."
+      when: not final_kubelet_config_check.stat.exists
 
     - name: Display join result
       debug:
