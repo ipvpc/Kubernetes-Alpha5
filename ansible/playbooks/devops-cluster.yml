@@ -157,6 +157,174 @@
         - kubeconfig_check.stat.exists
         - setup_network_isolation | bool
 
+    - name: Install Traefik Ingress Controller
+      block:
+        - name: Create Traefik namespace
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig }} create namespace traefik --dry-run=client -o yaml | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+          register: traefik_ns
+          changed_when: traefik_ns.rc == 0
+          failed_when: false
+          when: kubeconfig_check.stat.exists
+
+        - name: Install Traefik Ingress Controller
+          shell: |
+            cat <<EOF | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+            apiVersion: v1
+            kind: Namespace
+            metadata:
+              name: traefik
+            ---
+            apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: traefik-ingress-controller
+              namespace: traefik
+            ---
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: ClusterRole
+            metadata:
+              name: traefik-ingress-controller
+            rules:
+            - apiGroups:
+              - ""
+              resources:
+              - services
+              - endpoints
+              - secrets
+              verbs:
+              - get
+              - list
+              - watch
+            - apiGroups:
+              - networking.k8s.io
+              resources:
+              - ingresses
+              verbs:
+              - get
+              - list
+              - watch
+            - apiGroups:
+              - networking.k8s.io
+              resources:
+              - ingresses/status
+              verbs:
+              - update
+            ---
+            apiVersion: rbac.authorization.k8s.io/v1
+            kind: ClusterRoleBinding
+            metadata:
+              name: traefik-ingress-controller
+            roleRef:
+              apiGroup: rbac.authorization.k8s.io
+              kind: ClusterRole
+              name: traefik-ingress-controller
+            subjects:
+            - kind: ServiceAccount
+              name: traefik-ingress-controller
+              namespace: traefik
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: traefik
+              namespace: traefik
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: traefik
+              template:
+                metadata:
+                  labels:
+                    app: traefik
+                spec:
+                  serviceAccountName: traefik-ingress-controller
+                  containers:
+                  - name: traefik
+                    image: traefik:v2.10
+                    args:
+                    - --api.insecure=true
+                    - --providers.kubernetesingress=true
+                    - --entrypoints.web.address=:80
+                    - --entrypoints.websecure.address=:443
+                    ports:
+                    - name: web
+                      containerPort: 80
+                    - name: websecure
+                      containerPort: 443
+                    - name: admin
+                      containerPort: 8080
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: traefik
+              namespace: traefik
+            spec:
+              type: NodePort
+              selector:
+                app: traefik
+              ports:
+              - name: web
+                port: 80
+                targetPort: 80
+                nodePort: 30080
+              - name: websecure
+                port: 443
+                targetPort: 443
+                nodePort: 30443
+              - name: admin
+                port: 8080
+                targetPort: 8080
+                nodePort: 30880
+            EOF
+          register: traefik_install
+          retries: 3
+          delay: 10
+          until: traefik_install.rc == 0
+          when: kubeconfig_check.stat.exists
+
+        - name: Wait for Traefik to be ready
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig }} wait --for=condition=ready pod -l app=traefik -n traefik --timeout=300s
+          register: traefik_wait
+          retries: 10
+          delay: 10
+          until: traefik_wait.rc == 0
+          changed_when: false
+          ignore_errors: yes
+          when: kubeconfig_check.stat.exists
+
+        - name: Create Traefik IngressClass
+          shell: |
+            cat <<EOF | kubectl --kubeconfig={{ kubeconfig }} apply -f -
+            apiVersion: networking.k8s.io/v1
+            kind: IngressClass
+            metadata:
+              name: traefik
+            spec:
+              controller: traefik.io/ingress-controller
+            EOF
+          register: traefik_ingressclass
+          changed_when: traefik_ingressclass.rc == 0
+          failed_when: false
+          when: kubeconfig_check.stat.exists
+
+        - name: Check Traefik status
+          shell: kubectl --kubeconfig={{ kubeconfig }} get pods,svc -n traefik
+          register: traefik_status
+          changed_when: false
+          failed_when: false
+          when: kubeconfig_check.stat.exists
+
+        - name: Display Traefik status
+          debug:
+            msg: "{{ traefik_status.stdout_lines }}"
+          when: traefik_status is defined
+
+      when: kubeconfig_check.stat.exists
+
     - name: Display cluster information
       debug:
         msg: |
@@ -165,6 +333,7 @@
           Cluster Name: {{ cluster_name }}
           CNI Plugin: {{ cni_plugin | default('calico') }}
           Network Isolation: {{ 'Enabled' if setup_network_isolation else 'Disabled' }}
+          Ingress Controller: Traefik
           ==========================================
           To access the cluster:
           1. Copy kubeconfig from master node:
@@ -173,6 +342,13 @@
              export KUBECONFIG=~/.kube/config-{{ cluster_name }}
           3. Verify cluster:
              kubectl get nodes
+          
+          Traefik Ingress Controller:
+          - HTTP: http://{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}:30080
+          - HTTPS: https://{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}:30443
+          - Dashboard: http://{{ hostvars[groups['control_plane'][0]]['ansible_host'] }}:30880
+          - Status: {{ 'Ready' if traefik_wait.rc == 0 | default(false) else 'Check manually' }}
+          
           {% if setup_network_isolation %}
           
           Network Isolation:
@@ -182,5 +358,28 @@
           - To expose services, use NodePort/LoadBalancer/Ingress
           - See: ansible/NETWORK_ISOLATION_GUIDE.md
           {% endif %}
+          
+          To create an ingress:
+          kubectl apply -f - <<EOF
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: example-ingress
+            annotations:
+              traefik.ingress.kubernetes.io/rule-type: PathPrefix
+          spec:
+            ingressClassName: traefik
+            rules:
+            - host: example.local
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: your-service
+                      port:
+                        number: 80
+          EOF
           ==========================================
 
