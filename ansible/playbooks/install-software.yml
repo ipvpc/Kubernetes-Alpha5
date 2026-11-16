@@ -1,5 +1,5 @@
 ---
-# Install the packages selected in the Alpha5 console.
+# Install the packages selected in Alpha5 Deployment Center.
 - name: Install required software
   hosts: k8s_nodes
   become: true

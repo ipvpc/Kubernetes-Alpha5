@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Alpha5 control plane.
+"""Alpha5 Deployment Center.
 
 Serves the settings UI, Kubernetes probe endpoints, and the API that writes
 Terraform and Ansible configuration.
@@ -235,11 +235,11 @@ def main() -> None:
     if config_store.repo_ready():
         config_store.ensure_exported()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"Alpha5 console listening on http://127.0.0.1:{PORT}", flush=True)
+    print(f"Alpha5 Deployment Center listening on http://127.0.0.1:{PORT}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping Alpha5 console", flush=True)
+        print("\nStopping Alpha5 Deployment Center", flush=True)
     finally:
         server.server_close()
 

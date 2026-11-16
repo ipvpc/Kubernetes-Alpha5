@@ -1,4 +1,4 @@
-"""PostgreSQL storage for Alpha5 console settings.
+"""PostgreSQL storage for Alpha5 Deployment Center settings.
 
 Connection details live in config/database.local.json, which is gitignored.
 Passwords are never returned by the API.

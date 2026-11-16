@@ -3,21 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Alpha5 Control</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23101828'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='Segoe UI,sans-serif' font-size='12' font-weight='700' fill='%23d4a054'%3EA5%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/styles.css?v=flow">
+  <title>Alpha5 Deployment Center</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23060910'/%3E%3Cpath d='M4 4h8v2H6v6H4zM20 4h8v8h-2V6h-6zM4 20h2v6h6v2H4zM26 20h2v8h-8v-2h6z' fill='%23e2b15a'/%3E%3Ctext x='16' y='20' text-anchor='middle' font-family='Segoe UI,sans-serif' font-size='9' font-weight='700' fill='%237dceef'%3EA5%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css?v=hud">
 </head>
 <body>
+  <div class="field" aria-hidden="true"></div>
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
         <span class="mark" aria-hidden="true">A5</span>
         <div>
           <strong>Alpha5</strong>
-          <span>Control plane</span>
+          <span>Deployment Center</span>
         </div>
       </div>
-      <nav aria-label="Control plane">
+      <nav aria-label="Alpha5 Deployment Center">
         <button type="button" class="nav" data-view="overview">Overview</button>
         <button type="button" class="nav" data-view="database">Database</button>
         <button type="button" class="nav" data-view="proxmox">Proxmox</button>
@@ -39,6 +40,7 @@
           <p class="eyebrow" id="eyebrow">Platform</p>
           <h1 id="page-title">Overview</h1>
         </div>
+        <p class="console-id"><span>Alpha5</span><span>Deployment Center</span></p>
       </header>
       <p id="notice" class="ok-note" hidden></p>
       <main id="content">
@@ -46,7 +48,7 @@
       </main>
     </div>
   </div>
-  <noscript>This console needs JavaScript to edit cluster settings.</noscript>
+  <noscript>Alpha5 Deployment Center needs JavaScript to edit cluster settings.</noscript>
   <script src="/app.js"></script>
 </body>
 </html>
