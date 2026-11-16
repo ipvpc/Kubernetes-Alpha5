@@ -212,3 +212,13 @@ variable "rancher_additional_settings" {
   default     = {}
 }
 
+variable "monitoring_scrape_jobs" {
+  description = "Prometheus scrape jobs written by the Alpha5 console"
+  type = list(object({
+    job_name     = string
+    metrics_path = string
+    targets      = list(string)
+  }))
+  default = []
+}
+

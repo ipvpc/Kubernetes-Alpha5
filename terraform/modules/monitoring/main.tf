@@ -1,6 +1,38 @@
 # Monitoring Module
 # Deploys Prometheus and Grafana for monitoring
 
+locals {
+  additional_scrape_configs = [
+    for job in var.scrape_jobs : {
+      job_name     = job.job_name
+      metrics_path = job.metrics_path
+      static_configs = [
+        {
+          targets = job.targets
+        }
+      ]
+    }
+  ]
+
+  prometheus_spec = merge(
+    {
+      resources = {
+        requests = {
+          cpu    = var.prometheus_cpu_request
+          memory = var.prometheus_memory_request
+        }
+        limits = {
+          cpu    = var.prometheus_cpu_limit
+          memory = var.prometheus_memory_limit
+        }
+      }
+    },
+    length(local.additional_scrape_configs) == 0 ? {} : {
+      additionalScrapeConfigs = local.additional_scrape_configs
+    }
+  )
+}
+
 resource "helm_release" "prometheus" {
   count = var.enable_monitoring ? 1 : 0
 
@@ -13,18 +45,7 @@ resource "helm_release" "prometheus" {
   values = [
     yamlencode({
       prometheus = {
-        prometheusSpec = {
-          resources = {
-            requests = {
-              cpu    = var.prometheus_cpu_request
-              memory = var.prometheus_memory_request
-            }
-            limits = {
-              cpu    = var.prometheus_cpu_limit
-              memory = var.prometheus_memory_limit
-            }
-          }
-        }
+        prometheusSpec = local.prometheus_spec
       }
       grafana = {
         enabled = var.enable_grafana

@@ -1,0 +1,29 @@
+---
+# Install cron schedules selected in the Alpha5 console.
+- name: Schedule host updates
+  hosts: k8s_nodes
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install unattended-upgrades when a schedule needs it
+      ansible.builtin.package:
+        name: unattended-upgrades
+        state: present
+      when: platform_updates | selectattr('enabled') | selectattr('action', 'equalto', 'unattended-upgrades') | list | length > 0
+
+    - name: Install update cron jobs
+      ansible.builtin.cron:
+        name: "alpha5-{{ item.name }}"
+        minute: "{{ item.cron.split()[0] }}"
+        hour: "{{ item.cron.split()[1] }}"
+        day: "{{ item.cron.split()[2] }}"
+        month: "{{ item.cron.split()[3] }}"
+        weekday: "{{ item.cron.split()[4] }}"
+        job: "{{ item.job }}"
+        user: root
+        state: "{{ 'present' if item.enabled else 'absent' }}"
+      loop: "{{ platform_updates }}"
+      when: >
+        item.scope == 'all' or
+        (item.scope == 'control_plane' and (is_control_plane | default(false))) or
+        (item.scope == 'workers' and not (is_control_plane | default(false)))

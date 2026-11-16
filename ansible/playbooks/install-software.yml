@@ -1,0 +1,16 @@
+---
+# Install the packages selected in the Alpha5 console.
+- name: Install required software
+  hosts: k8s_nodes
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install selected packages
+      ansible.builtin.package:
+        name: "{{ item.name if item.version == 'latest' else (item.name ~ '=' ~ item.version if ansible_os_family == 'Debian' else item.name ~ '-' ~ item.version) }}"
+        state: present
+      loop: "{{ platform_software }}"
+      when: >
+        item.scope == 'all' or
+        (item.scope == 'control_plane' and (is_control_plane | default(false))) or
+        (item.scope == 'workers' and not (is_control_plane | default(false)))

@@ -1,0 +1,19 @@
+---
+# Install node exporter on hosts marked for monitoring in the console.
+- name: Configure node monitoring
+  hosts: k8s_nodes
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Install the Prometheus node exporter
+      ansible.builtin.package:
+        name: prometheus-node-exporter
+        state: present
+      when: monitor | default(false) | bool
+
+    - name: Enable the Prometheus node exporter
+      ansible.builtin.service:
+        name: prometheus-node-exporter
+        state: started
+        enabled: true
+      when: monitor | default(false) | bool

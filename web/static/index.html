@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alpha5 Control</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23101828'/%3E%3Ctext x='16' y='21' text-anchor='middle' font-family='Segoe UI,sans-serif' font-size='12' font-weight='700' fill='%23d4a054'%3EA5%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="mark" aria-hidden="true">A5</span>
+        <div>
+          <strong>Alpha5</strong>
+          <span>Control plane</span>
+        </div>
+      </div>
+      <nav aria-label="Control plane">
+        <button type="button" class="nav" data-view="overview">Overview</button>
+        <button type="button" class="nav" data-view="proxmox">Proxmox</button>
+        <button type="button" class="nav" data-view="hosts">Hosts</button>
+        <button type="button" class="nav" data-view="cluster">Cluster</button>
+        <button type="button" class="nav" data-view="software">Software</button>
+        <button type="button" class="nav" data-view="updates">Updates</button>
+        <button type="button" class="nav" data-view="monitoring">Monitoring</button>
+        <button type="button" class="nav" data-view="services">Services</button>
+        <button type="button" class="nav" data-view="cicd">CI/CD</button>
+      </nav>
+      <p class="sidebar-foot" id="sidebar-foot">Loading settings</p>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="eyebrow">Platform</p>
+          <h1 id="page-title">Overview</h1>
+        </div>
+      </header>
+      <p id="notice" class="ok-note" hidden></p>
+      <main id="content">
+        <p class="loading">Loading settings…</p>
+      </main>
+    </div>
+  </div>
+  <noscript>This console needs JavaScript to edit cluster settings.</noscript>
+  <script src="/app.js"></script>
+</body>
+</html>

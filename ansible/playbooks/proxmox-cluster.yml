@@ -1,0 +1,51 @@
+---
+# Clone Kubernetes guests on Proxmox for hosts that have a Proxmox node set.
+# The API token secret is read from PROXMOX_TOKEN_SECRET and is not stored in the repo.
+- name: Clone Kubernetes nodes on Proxmox
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Require Proxmox connection settings
+      ansible.builtin.assert:
+        that:
+          - proxmox_api_host | default('') | length > 0
+          - proxmox_token_id | default('') | length > 0
+          - proxmox_gateway | default('') | length > 0
+          - lookup('env', 'PROXMOX_TOKEN_SECRET') | length > 0
+        fail_msg: >-
+          Set the Proxmox API host, token id, and gateway in the console,
+          then export PROXMOX_TOKEN_SECRET before running this playbook.
+
+    - name: Select guests that should be cloned
+      ansible.builtin.set_fact:
+        proxmox_guests: "{{ platform_hosts | rejectattr('proxmox_node', 'equalto', '') | list }}"
+
+    - name: Require at least one host assigned to a Proxmox node
+      ansible.builtin.assert:
+        that: proxmox_guests | length > 0
+        fail_msg: Set a Proxmox node on each host that should be cloned.
+
+    - name: Clone the Kubernetes guests
+      community.general.proxmox_kvm:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_token_id }}"
+        api_token_secret: "{{ lookup('env', 'PROXMOX_TOKEN_SECRET') }}"
+        node: "{{ item.proxmox_node }}"
+        name: "{{ item.name }}"
+        vmid: "{{ item.vmid | default(omit, true) }}"
+        clone: "{{ proxmox_template }}"
+        full: true
+        cores: "{{ item.cores }}"
+        memory: "{{ item.memory_mb }}"
+        scsi:
+          scsi0: "{{ proxmox_storage }}:{{ item.disk_gb }}"
+        net:
+          net0: "virtio,bridge={{ proxmox_bridge }}"
+        ipconfig:
+          ipconfig0: "ip={{ item.address }}/{{ proxmox_cidr_prefix }},gw={{ proxmox_gateway }}"
+        nameservers:
+          - "{{ proxmox_nameserver }}"
+        state: present
+        timeout: 300
+      loop: "{{ proxmox_guests }}"

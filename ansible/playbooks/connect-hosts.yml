@@ -1,0 +1,8 @@
+---
+# Check SSH connectivity for every Kubernetes node in the generated inventory.
+- name: Check SSH connectivity
+  hosts: k8s_nodes
+  gather_facts: false
+  tasks:
+    - name: Confirm Ansible can reach the host
+      ansible.builtin.ping:

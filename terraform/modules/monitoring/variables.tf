@@ -70,3 +70,13 @@ variable "grafana_ingress_host" {
   default     = "grafana.example.com"
 }
 
+variable "scrape_jobs" {
+  description = "Extra Prometheus scrape jobs, including node exporter targets"
+  type = list(object({
+    job_name     = string
+    metrics_path = string
+    targets      = list(string)
+  }))
+  default = []
+}
+

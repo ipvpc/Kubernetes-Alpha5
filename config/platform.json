@@ -1,0 +1,309 @@
+{
+  "proxmox": {
+    "api_host": "",
+    "api_user": "root@pam",
+    "token_id": "",
+    "node": "pve",
+    "storage": "local-lvm",
+    "bridge": "vmbr0",
+    "template": "ubuntu-2204",
+    "cidr_prefix": 24,
+    "gateway": "",
+    "nameserver": "1.1.1.1"
+  },
+  "cluster": {
+    "name": "alpha5",
+    "install_method": "kubeadm",
+    "kubernetes_version": "1.34.0",
+    "container_runtime": "containerd",
+    "cni_plugin": "flannel",
+    "pod_network_cidr": "10.245.0.0/16",
+    "service_cidr": "10.96.0.0/12",
+    "ansible_user": "support",
+    "ssh_private_key_file": "~/.ssh/id_rsa"
+  },
+  "hosts": [
+    {
+      "name": "master1",
+      "address": "192.168.10.73",
+      "role": "control_plane",
+      "node_name": "devops1-cluster",
+      "proxmox_node": "",
+      "vmid": null,
+      "cores": 4,
+      "memory_mb": 8192,
+      "disk_gb": 80,
+      "monitor": true
+    },
+    {
+      "name": "worker1",
+      "address": "192.168.10.74",
+      "role": "worker",
+      "node_name": "devops2-cluster",
+      "proxmox_node": "",
+      "vmid": null,
+      "cores": 4,
+      "memory_mb": 8192,
+      "disk_gb": 80,
+      "monitor": true
+    },
+    {
+      "name": "worker2",
+      "address": "192.168.10.75",
+      "role": "worker",
+      "node_name": "devops3-cluster",
+      "proxmox_node": "",
+      "vmid": null,
+      "cores": 4,
+      "memory_mb": 8192,
+      "disk_gb": 80,
+      "monitor": true
+    }
+  ],
+  "software": [
+    {
+      "name": "containerd",
+      "version": "latest",
+      "scope": "all"
+    },
+    {
+      "name": "chrony",
+      "version": "latest",
+      "scope": "all"
+    },
+    {
+      "name": "unattended-upgrades",
+      "version": "latest",
+      "scope": "all"
+    },
+    {
+      "name": "helm",
+      "version": "latest",
+      "scope": "control_plane"
+    },
+    {
+      "name": "prometheus-node-exporter",
+      "version": "latest",
+      "scope": "all"
+    }
+  ],
+  "updates": [
+    {
+      "name": "security-weekly",
+      "cron": "0 3 * * 0",
+      "scope": "all",
+      "action": "unattended-upgrades",
+      "enabled": true
+    },
+    {
+      "name": "package-monthly",
+      "cron": "0 4 1 * *",
+      "scope": "all",
+      "action": "apt-upgrade",
+      "enabled": false
+    }
+  ],
+  "monitoring": {
+    "environments": [
+      "dev"
+    ],
+    "grafana": true,
+    "grafana_ingress": true,
+    "grafana_host": "grafana.alpha5.finance",
+    "checks": []
+  },
+  "services": {
+    "dev": [
+      {
+        "name": "api-service",
+        "image": "alpha5/api-service",
+        "image_tag": "latest",
+        "replicas": 2,
+        "cpu_request": "100m",
+        "memory_request": "128Mi",
+        "cpu_limit": "500m",
+        "memory_limit": "512Mi",
+        "port": 8080,
+        "env": [
+          {
+            "key": "ENVIRONMENT",
+            "value": "development"
+          },
+          {
+            "key": "LOG_LEVEL",
+            "value": "debug"
+          },
+          {
+            "key": "DB_HOST",
+            "value": "dev-db.example.com"
+          }
+        ],
+        "enable_ingress": true,
+        "ingress_host": "api-dev.example.com",
+        "enable_service": true,
+        "service_type": "ClusterIP",
+        "monitor": true
+      },
+      {
+        "name": "web-app",
+        "image": "alpha5/web-app",
+        "image_tag": "latest",
+        "replicas": 2,
+        "cpu_request": "100m",
+        "memory_request": "128Mi",
+        "cpu_limit": "500m",
+        "memory_limit": "512Mi",
+        "port": 3000,
+        "env": [
+          {
+            "key": "ENVIRONMENT",
+            "value": "development"
+          },
+          {
+            "key": "API_URL",
+            "value": "http://api-service-service:8080"
+          }
+        ],
+        "enable_ingress": true,
+        "ingress_host": "app-dev.example.com",
+        "enable_service": true,
+        "service_type": "ClusterIP",
+        "monitor": true
+      }
+    ],
+    "staging": [
+      {
+        "name": "api-service",
+        "image": "alpha5/api-service",
+        "image_tag": "v1.0.0",
+        "replicas": 3,
+        "cpu_request": "200m",
+        "memory_request": "256Mi",
+        "cpu_limit": "1000m",
+        "memory_limit": "1Gi",
+        "port": 8080,
+        "env": [
+          {
+            "key": "ENVIRONMENT",
+            "value": "staging"
+          },
+          {
+            "key": "LOG_LEVEL",
+            "value": "info"
+          },
+          {
+            "key": "DB_HOST",
+            "value": "staging-db.example.com"
+          }
+        ],
+        "enable_ingress": true,
+        "ingress_host": "api-staging.example.com",
+        "enable_service": true,
+        "service_type": "ClusterIP",
+        "monitor": true
+      },
+      {
+        "name": "web-app",
+        "image": "alpha5/web-app",
+        "image_tag": "v1.0.0",
+        "replicas": 3,
+        "cpu_request": "200m",
+        "memory_request": "256Mi",
+        "cpu_limit": "1000m",
+        "memory_limit": "1Gi",
+        "port": 3000,
+        "env": [
+          {
+            "key": "ENVIRONMENT",
+            "value": "staging"
+          },
+          {
+            "key": "API_URL",
+            "value": "http://api-service-service:8080"
+          }
+        ],
+        "enable_ingress": true,
+        "ingress_host": "app-staging.example.com",
+        "enable_service": true,
+        "service_type": "ClusterIP",
+        "monitor": true
+      }
+    ],
+    "prod": [
+      {
+        "name": "api-service",
+        "image": "alpha5/api-service",
+        "image_tag": "v1.0.0",
+        "replicas": 5,
+        "cpu_request": "500m",
+        "memory_request": "512Mi",
+        "cpu_limit": "2000m",
+        "memory_limit": "2Gi",
+        "port": 8080,
+        "env": [
+          {
+            "key": "ENVIRONMENT",
+            "value": "production"
+          },
+          {
+            "key": "LOG_LEVEL",
+            "value": "warn"
+          },
+          {
+            "key": "DB_HOST",
+            "value": "prod-db.example.com"
+          }
+        ],
+        "enable_ingress": true,
+        "ingress_host": "api.example.com",
+        "enable_service": true,
+        "service_type": "ClusterIP",
+        "monitor": true
+      },
+      {
+        "name": "web-app",
+        "image": "alpha5/web-app",
+        "image_tag": "v1.0.0",
+        "replicas": 5,
+        "cpu_request": "500m",
+        "memory_request": "512Mi",
+        "cpu_limit": "2000m",
+        "memory_limit": "2Gi",
+        "port": 3000,
+        "env": [
+          {
+            "key": "ENVIRONMENT",
+            "value": "production"
+          },
+          {
+            "key": "API_URL",
+            "value": "http://api-service-service:8080"
+          }
+        ],
+        "enable_ingress": true,
+        "ingress_host": "app.example.com",
+        "enable_service": true,
+        "service_type": "ClusterIP",
+        "monitor": true
+      }
+    ]
+  },
+  "cicd": {
+    "registry": "ghcr.io",
+    "branches": {
+      "dev": "develop",
+      "staging": "release",
+      "prod": "main"
+    },
+    "pipelines": [
+      {
+        "name": "web-app",
+        "image": "alpha5/web-app",
+        "context": "web",
+        "dockerfile": "Dockerfile",
+        "environment": "dev",
+        "auto_deploy": false
+      }
+    ]
+  }
+}

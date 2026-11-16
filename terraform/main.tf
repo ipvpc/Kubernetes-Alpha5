@@ -144,6 +144,7 @@ module "monitoring" {
   grafana_admin_password = var.grafana_admin_password
   enable_grafana_ingress = var.enable_grafana_ingress
   grafana_ingress_host   = var.grafana_ingress_host
+  scrape_jobs            = var.monitoring_scrape_jobs
 }
 
 # Deploy Rancher (optional)
