@@ -13,6 +13,8 @@ import re
 import threading
 from pathlib import Path
 
+import database
+
 REPO = Path(os.environ.get("ALPHA5_REPO", Path(__file__).resolve().parent.parent))
 CONFIG_PATH = REPO / "config" / "platform.json"
 ENVIRONMENTS = ("dev", "staging", "prod")
@@ -176,11 +178,29 @@ def load() -> dict:
         return _read()
 
 
-def ensure_exported() -> dict:
+def preview() -> dict:
+    """Settings file for display before PostgreSQL is connected. Does not write."""
+    with LOCK:
+        return _seed_config()
+
+
+def ensure_exported() -> dict | None:
+    if not repo_ready():
+        raise ConfigError("Run the console from the Kubernetes-Alpha5 repository to save settings.")
+    if not database.can_connect():
+        return None
+    with LOCK:
+        cfg = _read()
+        _export(cfg)
+        return cfg
+
+
+def seed_and_store() -> dict:
     if not repo_ready():
         raise ConfigError("Run the console from the Kubernetes-Alpha5 repository to save settings.")
     with LOCK:
-        cfg = _read()
+        cfg = _seed_config()
+        _write_config(cfg)
         _export(cfg)
         return cfg
 
@@ -396,10 +416,13 @@ def _update(mutator) -> dict:
     if not repo_ready():
         raise ConfigError("Run the console from the Kubernetes-Alpha5 repository to save settings.")
     with LOCK:
-        cfg = mutator(_read())
-        cfg = _validate(cfg)
-        _write_config(cfg)
-        _export(cfg)
+        try:
+            cfg = mutator(_read())
+            cfg = _validate(cfg)
+            _write_config(cfg)
+            _export(cfg)
+        except database.DatabaseError as exc:
+            raise ConfigError(str(exc)) from exc
         return cfg
 
 
@@ -413,20 +436,35 @@ def _delete_named(section: str, name: str, label: str) -> dict:
 
 
 def _read() -> dict:
-    if not CONFIG_PATH.is_file():
-        cfg = _validate(default_config())
-        if repo_ready():
-            _write_config(cfg)
-            _export(cfg)
-        return cfg
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ConfigError(f"config/platform.json is invalid JSON: {exc}") from exc
-    return _validate(data)
+        stored = database.load_config()
+    except database.DatabaseError as exc:
+        raise ConfigError(str(exc)) from exc
+    if stored is None:
+        cfg = _seed_config()
+        try:
+            database.save_config(cfg)
+        except database.DatabaseError as exc:
+            raise ConfigError(str(exc)) from exc
+        _write_text(CONFIG_PATH, json.dumps(cfg, indent=2) + "\n")
+        return cfg
+    return _validate(stored)
+
+
+def _seed_config() -> dict:
+    if CONFIG_PATH.is_file():
+        try:
+            return _validate(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, ConfigError):
+            pass
+    return _validate(default_config())
 
 
 def _write_config(cfg: dict) -> None:
+    try:
+        database.save_config(cfg)
+    except database.DatabaseError as exc:
+        raise ConfigError(str(exc)) from exc
     _write_text(CONFIG_PATH, json.dumps(cfg, indent=2) + "\n")
 
 

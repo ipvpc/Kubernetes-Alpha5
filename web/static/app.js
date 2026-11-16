@@ -1,7 +1,9 @@
 const views = {
   overview: { eyebrow: "Platform", title: "Overview" },
+  database: { eyebrow: "Storage", title: "Database" },
   proxmox: { eyebrow: "Infrastructure", title: "Proxmox" },
   hosts: { eyebrow: "Infrastructure", title: "Hosts" },
+  flow: { eyebrow: "Platform", title: "Flow" },
   cluster: { eyebrow: "Kubernetes", title: "Cluster" },
   software: { eyebrow: "Kubernetes", title: "Software" },
   updates: { eyebrow: "Maintenance", title: "Updates" },
@@ -12,7 +14,10 @@ const views = {
 
 const state = {
   view: "overview",
+  ready: false,
   config: null,
+  preview: null,
+  database: null,
   checks: null,
   error: "",
   form: null,
@@ -169,8 +174,16 @@ function renderOverview() {
     ["Install node exporter", "ansible-playbook -i ansible/inventory.yml ansible/playbooks/configure-monitoring.yml"],
     ["Plan Terraform", "terraform -chdir=terraform plan -var-file=../environments/dev/terraform.tfvars"],
   ];
+  const database = state.database && state.database.connected
+    ? `Settings are stored in PostgreSQL ${state.database.database} on ${state.database.host}${state.database.version ? ` (${state.database.version})` : ""}.`
+    : "PostgreSQL is not connected.";
   return `
     <div class="stack">
+      <article class="card">
+        <p class="kicker">PostgreSQL</p>
+        <h2>${state.database && state.database.connected ? "Connected" : "Not connected"}</h2>
+        <p>${esc(database)}</p>
+      </article>
       <section class="metrics">
         <article class="card metric"><span>Hosts</span><strong>${config.hosts.length}</strong></article>
         <article class="card metric"><span>Control plane</span><strong>${controlPlane}</strong></article>
@@ -193,6 +206,24 @@ function renderOverview() {
         ${commands.map(([label, command]) => `<div class="command"><span>${esc(label)}</span><code>${esc(command)}</code></div>`).join("")}
       </article>
     </div>
+  `;
+}
+
+function renderDatabase() {
+  const db = state.database || { host: "postgres.alpha5.finance", port: 5432, database: "alpha5", user: "systems", password_set: false, connected: false, error: "" };
+  const status = db.connected ? `Connected${db.version ? ` to PostgreSQL ${db.version}` : ""}` : "Not connected";
+  return `
+    <form class="card form-grid" data-kind="database" data-method="PUT" data-path="/api/database" autocomplete="off">
+      <p class="meta span-2">Save the connection here. Proxmox, hosts, cluster, software, updates, monitoring, services, and CI/CD then save into PostgreSQL from their own screens. The password stays in config/database.local.json on this machine.</p>
+      <p class="span-2 ${db.connected ? "ok-text" : "warn-text"}">${esc(status)}${db.error ? `. ${esc(db.error)}` : ""}</p>
+      ${field("Host", "db_host", db.host, { required: true })}
+      ${field("Port", "db_port", db.port, { type: "number", required: true })}
+      ${field("Database", "db_name", db.database, { required: true })}
+      ${field("User", "db_user", db.user, { required: true })}
+      ${field("Password", "db_password", "", { type: "password" })}
+      <p class="meta span-2">${db.password_set ? "A password is already saved for systems. Leave this blank to keep it." : "Enter the password for user systems. It is stored only in config/database.local.json on this machine."}</p>
+      <div class="form-actions span-2"><button class="btn primary" type="submit">Save connection</button></div>
+    </form>
   `;
 }
 
@@ -526,8 +557,196 @@ function renderCicd() {
   `;
 }
 
+function flowConfig() {
+  return state.config || state.preview;
+}
+
+function endpoint(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text.length > 300 || /\s/.test(text)) return null;
+  if (text.includes("://")) {
+    try {
+      const url = new URL(text);
+      if (!url.hostname) return null;
+      return { host: url.hostname, port: url.port };
+    } catch {
+      return null;
+    }
+  }
+  if (!/^[A-Za-z0-9._:-]+$/.test(text)) return null;
+  const match = text.match(/^([A-Za-z0-9._-]+):(\d{1,5})$/);
+  if (match) return { host: match[1], port: match[2] };
+  if (text.includes(".") || text.endsWith("-service")) return { host: text, port: "" };
+  return null;
+}
+
+function serviceForHost(host, services) {
+  return services.find((service) => host === service.name || host === `${service.name}-service` || (service.ingress_host && host === service.ingress_host));
+}
+
+function placement(host, service) {
+  if (!service.enable_service || service.replicas < 1) return { kind: "off", label: "Off" };
+  if (host.role === "worker") return { kind: "runs", label: "Runs" };
+  if (host.role === "control_plane") return { kind: "schedules", label: "Schedules" };
+  return { kind: "none", label: "—" };
+}
+
+function flowEdges(config, environment) {
+  const services = config.services[environment] || [];
+  const hosts = config.hosts || [];
+  const workers = hosts.filter((host) => host.role === "worker");
+  const planes = hosts.filter((host) => host.role === "control_plane");
+  const cluster = config.cluster;
+  const monitoring = config.monitoring;
+  const watched = monitoring.environments.includes(environment);
+  const edges = [];
+  if (planes.length && workers.length) {
+    edges.push({
+      from: planes.map((host) => host.name).join(", "),
+      path: `${cluster.install_method} scheduler`,
+      to: workers.map((host) => host.name).join(", "),
+      detail: `${cluster.kubernetes_version} · ${cluster.cni_plugin} ${cluster.pod_network_cidr} · services ${cluster.service_cidr}`,
+    });
+  }
+  for (const host of hosts) {
+    if (!host.proxmox_node) continue;
+    edges.push({
+      from: host.proxmox_node,
+      path: "Proxmox VM",
+      to: `${host.name} ${host.address}`,
+      detail: host.vmid ? `VMID ${host.vmid}` : "VMID is not saved",
+    });
+  }
+  const workerLabel = workers.length ? workers.map((host) => host.name).join(", ") : "No worker hosts";
+  for (const service of services) {
+    const target = `${service.name}:${service.port}`;
+    if (service.enable_ingress && service.ingress_host) {
+      edges.push({
+        from: "Clients",
+        path: `HTTPS ${service.ingress_host}`,
+        to: target,
+        detail: service.service_type,
+      });
+    }
+    if (service.enable_service && service.replicas > 0) {
+      edges.push({
+        from: target,
+        path: service.service_type,
+        to: workerLabel,
+        detail: `${service.replicas} replicas, shared across workers`,
+      });
+    }
+    for (const pair of service.env || []) {
+      const point = endpoint(pair.value);
+      if (!point) continue;
+      const match = serviceForHost(point.host, services);
+      const port = point.port ? `:${point.port}` : "";
+      edges.push({
+        from: service.name,
+        path: pair.key,
+        to: match ? `${match.name}${port}` : `${point.host}${port}`,
+        detail: match ? "In-cluster service DNS" : "Host saved on the service",
+      });
+    }
+    if (service.monitor && service.enable_ingress && service.ingress_host) {
+      edges.push({
+        from: "Health checks",
+        path: "GET /health",
+        to: `https://${service.ingress_host}/health`,
+        detail: "monitoring/http-checks.yml",
+      });
+    }
+  }
+  if (watched) {
+    const targets = hosts.filter((host) => host.monitor).map((host) => `${host.address}:9100`);
+    if (targets.length) {
+      edges.push({
+        from: "Prometheus",
+        path: "scrape /metrics",
+        to: targets.join(", "),
+        detail: "Node exporter on hosts with monitoring on",
+      });
+    }
+    if (monitoring.grafana) {
+      edges.push({
+        from: monitoring.grafana_ingress ? monitoring.grafana_host : "Grafana",
+        path: "reads metrics",
+        to: "Prometheus",
+        detail: "Installed together for this environment",
+      });
+    }
+  }
+  const branch = config.cicd.branches[environment] || "";
+  for (const pipeline of config.cicd.pipelines) {
+    if (pipeline.environment !== environment) continue;
+    const matched = services.filter((service) => service.image === pipeline.image).map((service) => service.name);
+    edges.push({
+      from: `${branch} · ${config.cicd.registry}`,
+      path: pipeline.name,
+      to: matched.length ? matched.join(", ") : pipeline.image,
+      detail: pipeline.auto_deploy ? "Auto-deploy is on" : "Auto-deploy is off",
+    });
+  }
+  return edges;
+}
+
+function renderFlow() {
+  const config = flowConfig();
+  if (!config) {
+    return `<article class="card"><h2>Save the PostgreSQL connection first</h2><p>The flow map reads the saved hosts and services.</p><div class="actions"><button class="btn primary" type="button" data-action="show-database">Open Database</button></div></article>`;
+  }
+  const environment = state.serviceEnv;
+  const services = config.services[environment] || [];
+  const hosts = config.hosts || [];
+  const watched = config.monitoring.environments.includes(environment);
+  const switcher = environments.map((item) => `<button class="btn${environment === item ? " primary" : ""}" type="button" data-action="service-env" data-environment="${item}">${item}</button>`).join("");
+  const head = services.map((service) => `<th>${esc(service.name)}<span class="host-meta">${esc(service.replicas)} replicas · :${esc(service.port)}</span></th>`).join("");
+  const rows = hosts.map((host) => {
+    const cells = services.map((service) => {
+      const place = placement(host, service);
+      const note = place.kind === "runs"
+        ? `${service.replicas} replicas are shared. This host is eligible and is not pinned.`
+        : place.kind === "schedules"
+          ? "The control plane schedules this service. Pods are not placed here."
+          : "This service is off.";
+      return `<td><span class="place ${place.kind}" title="${esc(note)}">${esc(place.label)}</span></td>`;
+    }).join("");
+    const metrics = !host.monitor ? "Off" : watched ? ":9100" : "Not scraped";
+    const metricKind = !host.monitor ? "off" : watched ? "runs" : "schedules";
+    const role = host.role === "control_plane" ? "Control plane" : "Worker";
+    return `<tr><th scope="row"><span class="host-name">${esc(host.name)}</span><span class="host-meta">${esc(role)} · ${esc(host.address)}</span></th>${cells}<td><span class="place ${metricKind}">${esc(metrics)}</span></td></tr>`;
+  }).join("");
+  const body = rows || `<tr><td colspan="${services.length + 2}">No hosts saved.</td></tr>`;
+  const edges = flowEdges(config, environment);
+  const flowRows = edges.map((edge) => `<tr><td>${esc(edge.from)}</td><td class="flow-path">${esc(edge.path)}</td><td>${esc(edge.to)}</td><td>${esc(edge.detail)}</td></tr>`).join("");
+  const fileNote = state.config ? "" : `<p class="meta">Showing the settings file. Connect PostgreSQL to save later changes into the database.</p>`;
+  return `
+    <div class="stack">
+      <div class="env-switch">${switcher}</div>
+      ${fileNote}
+      <section class="table-wrap">
+        <h2>Hosts and services</h2>
+        <p class="meta">Runs means the worker is eligible for pods. Schedules means the control plane places those pods. Replicas are shared and are not pinned to one host. Metrics shows node exporter when this environment collects it.</p>
+        ${services.length ? "" : `<p class="meta">No services in ${esc(environment)}.</p>`}
+        <table class="matrix" aria-label="Hosts and services in ${esc(environment)}">
+          <thead><tr><th>Host</th>${head}<th>Metrics</th></tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </section>
+      <section class="table-wrap">
+        <h2>How data moves</h2>
+        <table aria-label="Data flow in ${esc(environment)}">
+          <thead><tr><th>From</th><th>Path</th><th>To</th><th>Detail</th></tr></thead>
+          <tbody>${flowRows || `<tr><td colspan="4">No connections in ${esc(environment)}.</td></tr>`}</tbody>
+        </table>
+      </section>
+    </div>
+  `;
+}
+
 const pages = {
   overview: renderOverview,
+  database: renderDatabase,
   proxmox: renderProxmox,
   hosts: renderHosts,
   cluster: renderCluster,
@@ -535,6 +754,7 @@ const pages = {
   updates: renderUpdates,
   monitoring: renderMonitoring,
   services: renderServices,
+  flow: renderFlow,
   cicd: renderCicd,
 };
 
@@ -547,12 +767,22 @@ function render() {
     else button.removeAttribute("aria-current");
   });
   const foot = document.querySelector("#sidebar-foot");
-  foot.textContent = state.config ? `${state.config.cluster.name} · ${state.config.hosts.length} hosts` : "Loading settings";
+  if (state.database && state.database.connected) foot.textContent = `PostgreSQL · ${state.database.database}`;
+  else if (state.config) foot.textContent = `${state.config.cluster.name} · ${state.config.hosts.length} hosts`;
+  else foot.textContent = state.ready ? "PostgreSQL not connected" : "Loading settings";
   const content = document.querySelector("#content");
-  if (!state.config) {
+  if (!state.ready) {
+    content.innerHTML = `<p class="loading">Loading settings…</p>`;
+    return;
+  }
+  if (!state.config && state.view === "flow" && state.preview) {
+    content.innerHTML = pages.flow();
+    return;
+  }
+  if (!state.config && state.view !== "database") {
     content.innerHTML = state.error
       ? `<div class="error" role="alert"><p>${esc(state.error)}</p><button class="btn primary" type="button" data-action="reload">Reload</button></div>`
-      : `<p class="loading">Loading settings…</p>`;
+      : `<article class="card"><h2>Save the PostgreSQL connection first</h2><p>The setting screens write to PostgreSQL after the connection is saved.</p><div class="actions"><button class="btn primary" type="button" data-action="show-database">Open Database</button></div></article>`;
     return;
   }
   content.innerHTML = pages[state.view]();
@@ -584,6 +814,15 @@ function envPairs(text) {
 
 function payloadFor(form) {
   const kind = form.dataset.kind;
+  if (kind === "database") {
+    return {
+      host: form.elements.db_host.value,
+      port: numberValue(form, "db_port"),
+      database: form.elements.db_name.value,
+      user: form.elements.db_user.value,
+      password: form.elements.db_password.value,
+    };
+  }
   if (kind === "proxmox") {
     return {
       api_host: form.elements.api_host.value,
@@ -696,10 +935,11 @@ async function saveForm(form) {
   }
   try {
     const data = await api(form.dataset.method, form.dataset.path, payload);
+    if (data.database) state.database = data.database;
     state.config = data.config;
     state.form = null;
     state.confirm = null;
-    showNotice(`${data.message}. Ansible, Terraform, and the deploy workflow were updated.`);
+    showNotice(data.message);
     render();
   } catch (error) {
     showNotice(error.message, "error");
@@ -713,10 +953,11 @@ async function removeCurrent() {
     : `/api/${item.kind}/${encodeURIComponent(item.name)}`;
   try {
     const data = await api("DELETE", path);
+    if (data.database) state.database = data.database;
     state.config = data.config;
     state.form = null;
     state.confirm = null;
-    showNotice(`${data.message}. Ansible, Terraform, and the deploy workflow were updated.`);
+    showNotice(data.message);
     render();
   } catch (error) {
     showNotice(error.message, "error");
@@ -738,14 +979,22 @@ async function load() {
   state.error = "";
   try {
     const data = await api("GET", "/api/config");
+    state.database = data.database;
     state.config = data.config;
+    state.preview = data.preview || null;
+    state.ready = true;
+    if (!state.config) state.view = "database";
     render();
+    if (!state.config) return;
     state.checks = (await api("GET", "/api/health")).checks;
     if (!state.form) render();
   } catch (error) {
+    state.ready = true;
     state.error = error.message;
-    if (!state.config) render();
-    else showNotice(error.message, "error");
+    if (!state.config) {
+      state.view = "database";
+      render();
+    } else showNotice(error.message, "error");
   }
 }
 
@@ -787,6 +1036,12 @@ document.body.addEventListener("click", (event) => {
   if (action === "confirm-remove") removeCurrent();
   if (action === "health") refreshHealth();
   if (action === "reload") load();
+  if (action === "show-database") {
+    state.view = "database";
+    state.form = null;
+    state.confirm = null;
+    render();
+  }
   if (action === "service-env") {
     state.serviceEnv = button.dataset.environment;
     state.form = null;

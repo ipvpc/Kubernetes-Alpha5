@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlparse
 
 import checks
 import config_store
+import database
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
@@ -60,8 +61,21 @@ class Handler(SimpleHTTPRequestHandler):
         self._mutate(self._delete)
 
     def _config_response(self) -> None:
+        info = database.status()
+        if not info["connected"]:
+            self._send_json(200, {
+                "config": None,
+                "preview": config_store.preview(),
+                "database": info,
+                "generated": [],
+            })
+            return
         cfg = config_store.load()
-        self._send_json(200, {"config": cfg, "generated": config_store.generated_paths()})
+        self._send_json(200, {
+            "config": cfg,
+            "database": database.status(),
+            "generated": config_store.generated_paths(),
+        })
 
     def _post(self, route: str, payload: dict) -> None:
         if route == "/api/hosts":
@@ -86,6 +100,9 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _put(self, route: str, payload: dict) -> None:
         parts = self._parts(route)
+        if route == "/api/database":
+            self._save_database(payload)
+            return
         if route == "/api/proxmox":
             self._saved(config_store.save_proxmox(payload), "Proxmox settings saved")
             return
@@ -137,16 +154,41 @@ class Handler(SimpleHTTPRequestHandler):
             return
         self._send_json(404, {"error": "Unknown API route"})
 
+    def _save_database(self, payload: dict) -> None:
+        info = database.save_connection(payload)
+        cfg = None
+        imported = False
+        if info["connected"] and database.load_config() is None:
+            cfg = config_store.seed_and_store()
+            imported = True
+        elif info["connected"]:
+            cfg = config_store.load()
+        message = "PostgreSQL connection saved"
+        if imported:
+            message += ". Existing console settings were imported"
+        checks.invalidate()
+        self._send_json(200, {
+            "message": message,
+            "config": cfg,
+            "database": database.status(),
+            "generated": config_store.generated_paths() if cfg else [],
+        })
+
     def _saved(self, cfg: dict, message: str) -> None:
         checks.invalidate()
-        self._send_json(200, {"message": message, "config": cfg, "generated": config_store.generated_paths()})
+        self._send_json(200, {
+            "message": f"{message} and saved to PostgreSQL",
+            "config": cfg,
+            "database": database.status(),
+            "generated": config_store.generated_paths(),
+        })
 
     def _mutate(self, method) -> None:
         route = urlparse(self.path).path
         try:
             payload = self._read_json()
             method(route, payload)
-        except config_store.ConfigError as exc:
+        except (config_store.ConfigError, database.DatabaseError) as exc:
             self._send_json(400, {"error": str(exc)})
         except json.JSONDecodeError:
             self._send_json(400, {"error": "Request body must be JSON"})
@@ -156,7 +198,7 @@ class Handler(SimpleHTTPRequestHandler):
     def _guard(self, method) -> None:
         try:
             method()
-        except config_store.ConfigError as exc:
+        except (config_store.ConfigError, database.DatabaseError) as exc:
             self._send_json(400, {"error": str(exc)})
 
     def _read_json(self) -> dict:

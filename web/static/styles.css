@@ -293,6 +293,28 @@ textarea { resize: vertical; min-height: 6rem; }
 .command span { color: var(--muted); font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; }
 .command code, td code { color: var(--text); white-space: normal; word-break: break-word; }
 
+.matrix td, .matrix th { vertical-align: top; text-transform: none; letter-spacing: normal; }
+.matrix thead th { text-transform: uppercase; letter-spacing: 0.04em; }
+.matrix th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+.matrix .host-name { display: block; font-weight: 600; }
+.matrix .host-meta { display: block; margin-top: 0.15rem; color: var(--muted); font-size: 0.78rem; }
+.place {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 0.78rem;
+}
+.place.runs { color: var(--green); }
+.place.schedules { color: var(--gold); }
+.place.off, .place.none { color: var(--muted); }
+.flow-path { color: var(--gold); }
+
 .nav:focus-visible, .btn:focus-visible, .refresh:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
