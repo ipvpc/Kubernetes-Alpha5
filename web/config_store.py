@@ -692,7 +692,15 @@ def _workflow(cfg: dict) -> str:
                 "        env:",
                 "          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG }}",
                 f"      - run: terraform -chdir=terraform init",
-                f"      - run: terraform -chdir=terraform apply -auto-approve -var-file=../environments/{pipeline['environment']}/terraform.tfvars",
+                # terraform.tfvars keeps credentials and labels. The console file is
+                # second so service and monitoring edits override those variables.
+                # Terraform only auto-loads *.auto.tfvars.json from the working
+                # directory, and apply runs with -chdir=terraform.
+                (
+                    "      - run: terraform -chdir=terraform apply -auto-approve "
+                    f"-var-file=../environments/{pipeline['environment']}/terraform.tfvars "
+                    f"-var-file=../environments/{pipeline['environment']}/platform.auto.tfvars.json"
+                ),
                 "        env:",
                 "          KUBECONFIG: ${{ runner.temp }}/kubeconfig",
             ])
