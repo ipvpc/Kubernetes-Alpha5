@@ -20,6 +20,15 @@ A comprehensive Terraform-based solution for deploying Kubernetes clusters and a
 - kubectl installed and configured
 - Helm 3.x (for monitoring and ingress modules)
 
+## Alpha5 Deployment Center setup
+
+1. Install Python 3.10 or newer with `pip` and `venv` available.
+2. From the repository root, run `python scripts/setup-web.py` (use `python3` if that is your Python command). The script installs and verifies the web UI dependencies in `.venv`. You can rerun it after a dependency change.
+3. Start the UI on Windows with `$env:HOST = '127.0.0.1'; .\.venv\Scripts\python.exe -u web/server.py`. On Linux or macOS, use `HOST=127.0.0.1 .venv/bin/python -u web/server.py`.
+4. Open [Alpha5 Deployment Center](http://127.0.0.1:3000). In **Database**, use `postgres.alpha5.finance` and user `systems`, enter the database name and password, and save the connection before editing settings.
+
+PostgreSQL is a separate service. The Kubernetes deployment steps use the infrastructure tools listed under Prerequisites and in `KUBERNETES_INSTALLATION.md`.
+
 ## Project Structure
 
 ```
