@@ -27,7 +27,13 @@ A comprehensive Terraform-based solution for deploying Kubernetes clusters and a
 3. Start the UI on Windows with `$env:HOST = '127.0.0.1'; .\.venv\Scripts\python.exe -u web/server.py`. On Linux or macOS, use `HOST=127.0.0.1 .venv/bin/python -u web/server.py`.
 4. Open [Alpha5 Deployment Center](http://127.0.0.1:3000). In **Database**, use `postgres.alpha5.finance` and user `systems`, enter the database name and password, and save the connection before editing settings.
 
-PostgreSQL is a separate service. The Kubernetes deployment steps use the infrastructure tools listed under Prerequisites and in `KUBERNETES_INSTALLATION.md`.
+PostgreSQL is a separate service.
+
+### Deployment tools on Windows
+
+Run `python scripts/setup-web.py --deploy` from PowerShell. Setup uses WinGet for Terraform, kubectl, and Helm, and Ubuntu 24.04 in WSL for Ansible and its Proxmox dependencies. If prompted, finish Ubuntu's first launch or reopen PowerShell to refresh your PATH, then rerun setup.
+
+Run `ansible-playbook` from Ubuntu and Terraform, kubectl, and Helm from PowerShell. Configure SSH access for Ansible and a kubeconfig for Terraform, kubectl, and Helm before deploying. Follow `KUBERNETES_INSTALLATION.md` for the cluster installation steps.
 
 ## Project Structure
 
