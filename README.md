@@ -29,6 +29,8 @@ A comprehensive Terraform-based solution for deploying Kubernetes clusters and a
 
 PostgreSQL is a separate service.
 
+Build the web UI image from the repository root with `docker build -t alpha5/web-app:latest web`. The image installs the Python dependencies from `web/requirements.txt`. Use the repository-based setup above if you need to save settings and regenerate Terraform and Ansible files.
+
 ### Deployment tools on Ubuntu
 
 On an Ubuntu 24.04 target, install Python and virtual environment support first with `sudo apt update` and `sudo apt install python3 python3-venv`. Then run `python3 scripts/setup-web.py --deploy` from the repository root. Setup verifies the web UI dependencies, installs missing Terraform, kubectl, and Helm through Snap, and installs Ansible and its Proxmox dependencies through APT. If the shell cannot find newly installed tools, open a new terminal so `/snap/bin` is on your PATH.
