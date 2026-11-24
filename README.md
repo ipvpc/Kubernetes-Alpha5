@@ -29,9 +29,17 @@ A comprehensive Terraform-based solution for deploying Kubernetes clusters and a
 
 PostgreSQL is a separate service.
 
+### Deployment tools on Ubuntu
+
+On an Ubuntu 24.04 target, install Python and virtual environment support first with `sudo apt update` and `sudo apt install python3 python3-venv`. Then run `python3 scripts/setup-web.py --deploy` from the repository root. Setup verifies the web UI dependencies, installs missing Terraform, kubectl, and Helm through Snap, and installs Ansible and its Proxmox dependencies through APT. If the shell cannot find newly installed tools, open a new terminal so `/snap/bin` is on your PATH.
+
+Configure SSH access and a kubeconfig before deploying. Follow `KUBERNETES_INSTALLATION.md` for the cluster installation steps.
+
 ### Deployment tools on Windows
 
 Run `python scripts/setup-web.py --deploy` from PowerShell. Setup uses WinGet for Terraform, kubectl, and Helm, and Ubuntu 24.04 in WSL for Ansible and its Proxmox dependencies. If prompted, finish Ubuntu's first launch or reopen PowerShell to refresh your PATH, then rerun setup.
+
+If Ubuntu 24.04 is already registered in WSL as `Ubuntu`, add `--wsl-distro Ubuntu`.
 
 Run `ansible-playbook` from Ubuntu and Terraform, kubectl, and Helm from PowerShell. Configure SSH access for Ansible and a kubeconfig for Terraform, kubectl, and Helm before deploying. Follow `KUBERNETES_INSTALLATION.md` for the cluster installation steps.
 
