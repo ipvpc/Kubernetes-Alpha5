@@ -210,7 +210,7 @@ function renderOverview() {
 }
 
 function renderDatabase() {
-  const db = state.database || { host: "postgres.alpha5.finance", port: 5432, database: "alpha5", user: "systems", password_set: false, connected: false, error: "" };
+  const db = state.database || { host: "postgres.alpha5.finance", port: 5432, database: "alpha5", user: "systems", sslmode: "disable", password_set: false, connected: false, error: "" };
   const status = db.connected ? `Connected${db.version ? ` to PostgreSQL ${db.version}` : ""}` : "Not connected";
   return `
     <form class="card form-grid" data-kind="database" data-method="PUT" data-path="/api/database" autocomplete="off">
@@ -220,6 +220,7 @@ function renderDatabase() {
       ${field("Port", "db_port", db.port, { type: "number", required: true })}
       ${field("Database", "db_name", db.database, { required: true })}
       ${field("User", "db_user", db.user, { required: true })}
+      ${select("TLS mode", "db_sslmode", db.sslmode, [["disable", "Disabled (plain TCP)"], ["prefer", "Prefer TLS (allow plain TCP)"], ["require", "Require TLS"]])}
       ${field("Password", "db_password", "", { type: "password" })}
       <p class="meta span-2">${db.password_set ? "A password is already saved for systems. Leave this blank to keep it." : "Enter the password for user systems. It is stored only in config/database.local.json on this machine."}</p>
       <div class="form-actions span-2"><button class="btn primary" type="submit">Save connection</button></div>
@@ -821,6 +822,7 @@ function payloadFor(form) {
       database: form.elements.db_name.value,
       user: form.elements.db_user.value,
       password: form.elements.db_password.value,
+      sslmode: form.elements.db_sslmode.value,
     };
   }
   if (kind === "proxmox") {

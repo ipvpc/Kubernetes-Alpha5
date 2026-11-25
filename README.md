@@ -29,6 +29,8 @@ A comprehensive Terraform-based solution for deploying Kubernetes clusters and a
 
 PostgreSQL is a separate service.
 
+On the **Database** screen, select **Disabled (plain TCP)** for a PostgreSQL server without TLS. **Require TLS** requires encryption. **Prefer TLS** allows the connection to fall back to plain TCP. Save the connection to apply the selected mode.
+
 Build the web UI image from the repository root with `docker build -t alpha5/web-app:latest web`. The image installs the Python dependencies from `web/requirements.txt`. Use the repository-based setup above if you need to save settings and regenerate Terraform and Ansible files.
 
 ### Deployment tools on Ubuntu

@@ -563,22 +563,31 @@ def _validate_connection(payload: dict, current: dict | None) -> dict:
         password = current["password"]
     if password == "" or "\n" in password or "\r" in password or len(password) > 200:
         raise DatabaseError("Database password is required.")
-    return {"host": host, "port": port, "database": database, "user": user, "password": password}
+    sslmode = payload.get("sslmode", _connection_sslmode(current))
+    if sslmode not in ("disable", "prefer", "require"):
+        raise DatabaseError("Database TLS mode must be disable, prefer, or require.")
+    return {"host": host, "port": port, "database": database, "user": user, "password": password, "sslmode": sslmode}
 
 
 def _connect(settings: dict) -> psycopg.Connection:
     return psycopg.connect(_dsn(settings), connect_timeout=10)
 
 
-def _dsn(settings: dict) -> str:
+def _connection_sslmode(settings: dict | None) -> str:
+    if settings is None:
+        return "disable"
     local = settings["host"] in {"localhost", "127.0.0.1", "::1"}
+    return settings.get("sslmode", "prefer" if local else "require")
+
+
+def _dsn(settings: dict) -> str:
     return psycopg.conninfo.make_conninfo(
         host=settings["host"],
         port=settings["port"],
         dbname=settings["database"],
         user=settings["user"],
         password=settings["password"],
-        sslmode="prefer" if local else "require",
+        sslmode=_connection_sslmode(settings),
     )
 
 
@@ -591,6 +600,7 @@ def _public_connection(saved: dict | None) -> dict:
             "port": 5432,
             "database": "alpha5",
             "user": "systems",
+            "sslmode": _connection_sslmode(None),
             "password_set": False,
             "version": "",
             "error": "",
@@ -602,6 +612,7 @@ def _public_connection(saved: dict | None) -> dict:
         "port": saved["port"],
         "database": saved["database"],
         "user": saved["user"],
+        "sslmode": _connection_sslmode(saved),
         "password_set": bool(saved.get("password")),
         "version": "",
         "error": "",
@@ -636,5 +647,6 @@ def _write_local(settings: dict) -> None:
         "database": settings["database"],
         "user": settings["user"],
         "password": settings["password"],
+        "sslmode": settings["sslmode"],
     }, indent=2) + "\n", encoding="utf-8", newline="\n")
     temporary.replace(CONNECTION_PATH)
