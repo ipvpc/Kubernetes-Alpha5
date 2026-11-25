@@ -59,6 +59,8 @@ def repo_ready() -> bool:
 
 
 def generated_paths() -> list[str]:
+    if not repo_ready():
+        return []
     paths = [
         "config/platform.json",
         "ansible/inventory.yml",
@@ -196,12 +198,10 @@ def ensure_exported() -> dict | None:
 
 
 def seed_and_store() -> dict:
-    if not repo_ready():
-        raise ConfigError("Run the console from the Kubernetes-Alpha5 repository to save settings.")
     with LOCK:
-        cfg = _seed_config()
-        _write_config(cfg)
-        _export(cfg)
+        cfg = _read()
+        if repo_ready():
+            _export(cfg)
         return cfg
 
 
@@ -413,14 +413,13 @@ def scrape_jobs(cfg: dict) -> list[dict]:
 
 
 def _update(mutator) -> dict:
-    if not repo_ready():
-        raise ConfigError("Run the console from the Kubernetes-Alpha5 repository to save settings.")
     with LOCK:
         try:
             cfg = mutator(_read())
             cfg = _validate(cfg)
             _write_config(cfg)
-            _export(cfg)
+            if repo_ready():
+                _export(cfg)
         except database.DatabaseError as exc:
             raise ConfigError(str(exc)) from exc
         return cfg
@@ -442,11 +441,7 @@ def _read() -> dict:
         raise ConfigError(str(exc)) from exc
     if stored is None:
         cfg = _seed_config()
-        try:
-            database.save_config(cfg)
-        except database.DatabaseError as exc:
-            raise ConfigError(str(exc)) from exc
-        _write_text(CONFIG_PATH, json.dumps(cfg, indent=2) + "\n")
+        _write_config(cfg)
         return cfg
     return _validate(stored)
 
@@ -465,7 +460,8 @@ def _write_config(cfg: dict) -> None:
         database.save_config(cfg)
     except database.DatabaseError as exc:
         raise ConfigError(str(exc)) from exc
-    _write_text(CONFIG_PATH, json.dumps(cfg, indent=2) + "\n")
+    if repo_ready():
+        _write_text(CONFIG_PATH, json.dumps(cfg, indent=2) + "\n")
 
 
 def _export(cfg: dict) -> None:

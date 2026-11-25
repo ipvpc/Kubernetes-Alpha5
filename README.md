@@ -31,7 +31,9 @@ PostgreSQL is a separate service.
 
 On the **Database** screen, select **Disabled (plain TCP)** for a PostgreSQL server without TLS. **Require TLS** requires encryption. **Prefer TLS** allows the connection to fall back to plain TCP. Save the connection to apply the selected mode.
 
-Build the web UI image from the repository root with `docker build -t alpha5/web-app:latest web`. The image installs the Python dependencies from `web/requirements.txt`. Use the repository-based setup above if you need to save settings and regenerate Terraform and Ansible files.
+Build the web UI image from the repository root with `docker build -t alpha5/web-app:latest web`. Run it with `docker run --name alpha5-web -p 127.0.0.1:3000:3000 -v alpha5-data:/var/lib/alpha5 alpha5/web-app:latest`. The named volume keeps the database connection settings when the container is replaced. Application settings are stored in PostgreSQL.
+
+To also generate Terraform and Ansible files, use the repository-based setup or mount a checkout at `/workspace` and pass `-e ALPHA5_REPO=/workspace` to `docker run`. The container runs as UID 65534, which needs write access to the generated files and their directories.
 
 ### Deployment tools on Ubuntu
 

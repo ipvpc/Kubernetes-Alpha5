@@ -7,6 +7,7 @@ Passwords are never returned by the API.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -14,8 +15,8 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Json
 
-REPO = Path(__file__).resolve().parent.parent
-CONNECTION_PATH = REPO / "config" / "database.local.json"
+REPO = Path(os.environ.get("ALPHA5_REPO", Path(__file__).resolve().parent.parent))
+CONNECTION_PATH = Path(os.environ.get("ALPHA5_DATA_DIR", REPO / "config")) / "database.local.json"
 HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 
@@ -189,7 +190,10 @@ def save_connection(payload: dict) -> dict:
         _prepare_database(settings)
     except psycopg.Error as exc:
         raise DatabaseError(_public_error(exc, settings["password"])) from exc
-    _write_local(settings)
+    try:
+        _write_local(settings)
+    except OSError as exc:
+        raise DatabaseError("Unable to save PostgreSQL connection settings. Check that the application can write to its data directory.") from exc
     return status()
 
 
